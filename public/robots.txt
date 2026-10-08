@@ -1,0 +1,5 @@
+# Link-preview crawlers (Twitterbot, facebookexternalhit, …) must be allowed
+# to read pages, otherwise X shows no card.
+User-agent: *
+Allow: /
+Disallow: /api/
