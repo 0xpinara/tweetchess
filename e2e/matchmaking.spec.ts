@@ -31,6 +31,7 @@ test('two browsers find each other through matchmaking and play a live game', as
   await alice.waitForURL(/\/game\/[A-Za-z0-9]{10}$/);
   await bob.waitForURL(/\/game\/[A-Za-z0-9]{10}$/);
   expect(alice.url()).toBe(bob.url());
+  await expect(statusTitle(alice)).toHaveText(/^(Your move|Opponent's move)$/);
 
   // Exactly one of them moves first, and each sees the other's name.
   await expect(alice.locator('.player-bar').first()).toContainText('Bob');
@@ -71,6 +72,9 @@ test('public games appear in the live directory and can be watched without chang
   }
   await carol.waitForURL(/\/game\//);
   await dave.waitForURL(/\/game\//);
+  // Wait for the game state before deciding who is White.
+  await expect(statusTitle(carol)).toHaveText(/^(Your move|Opponent's move)$/);
+  await expect(statusTitle(dave)).toHaveText(/^(Your move|Opponent's move)$/);
   const carolIsWhite = (await statusTitle(carol).textContent()) === 'Your move';
   const [white, black] = carolIsWhite ? [carol, dave] : [dave, carol];
 
