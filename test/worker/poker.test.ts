@@ -47,6 +47,16 @@ const nextError = (client: TestClient) =>
 
 const table = (tableId: string) => env.POKER_TABLE.getByName(tableId);
 
+/** Start from an empty table finder (other tests leave public tables behind). */
+async function resetFinder(): Promise<void> {
+  await runInDurableObject(env.LOBBY.getByName('poker'), (instance) => {
+    const lobby = instance as unknown as { sql: SqlStorage; reservations: Map<string, number[]>; freshTables: Map<string, number> };
+    lobby.sql.exec('DELETE FROM listings');
+    lobby.reservations.clear();
+    lobby.freshTables.clear();
+  });
+}
+
 /** The table's authoritative state, loaded the same way the object loads it after waking up. */
 async function serverState(tableId: string): Promise<TableState> {
   return runInDurableObject(table(tableId), (instance: PokerTable) => {
@@ -245,6 +255,32 @@ describe('poker tables', () => {
     for (const p of [...players, seventh]) p.client.close();
   });
 
+  it('a spectator who takes a seat later plays under the name they joined with', async () => {
+    const tableId = await openTable();
+    const watcher = await joinTable(tableId, { sit: false, name: 'Frank' });
+    expect(watcher.first.you.seat).toBeNull();
+    watcher.client.send({ type: 'sit', seat: 3 });
+    const seated = await nextState(watcher.client, (s) => s.you.seat === 3);
+    expect(seated.table.seats[3]?.name).toBe('Frank');
+    watcher.client.close();
+  });
+
+  it('fills one public table before opening another, even when players arrive in a burst', async () => {
+    await resetFinder();
+    const found: string[] = [];
+    const players: Seated[] = [];
+    for (let i = 0; i < 6; i++) {
+      found.push(await openTable('find'));
+      players.push(await joinTable(found[i]));
+    }
+    expect(new Set(found).size).toBe(1);
+    expect(new Set(players.map((p) => p.first.you.seat)).size).toBe(6);
+    // That table is full now, so the seventh player gets a new one.
+    const seventh = await openTable('find');
+    expect(seventh).not.toBe(found[0]);
+    for (const p of players) p.client.close();
+  });
+
   it('runs tables independently', async () => {
     const one = await openTable();
     const two = await openTable();
@@ -274,6 +310,7 @@ describe('poker tables', () => {
   });
 
   it('finds open public tables, lists them, and never lists private tables', async () => {
+    await resetFinder();
     const first = await openTable('find');
     const second = await openTable('find');
     expect(second).toBe(first); // a new table is offered to the next player too

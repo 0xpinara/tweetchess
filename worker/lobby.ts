@@ -50,7 +50,7 @@ export const LISTING_STALE_MS = 30 * 60 * 1000;
 const LISTING_PURGE_MS = 10 * 60 * 1000;
 /** Upper bound on directory size per game type (oldest entries are dropped). */
 const MAX_LISTINGS = 1000;
-/** Seats handed out by the table finder count as taken for this long. */
+/** A seat handed out by the table finder counts as taken until the player sits, or for at most this long. */
 const SEAT_RESERVATION_MS = 20_000;
 /** A table the finder just opened is offered to the next players for this long, even before it is listed. */
 const FRESH_TABLE_MS = 60_000;
@@ -120,6 +120,14 @@ export class GameLobby extends DurableObject<Env> {
     if (game && entry.game !== game) throw new Error(`Listing for ${entry.game} sent to the ${game} lobby`);
     if (!/^[A-Za-z0-9]{1,16}$/.test(entry.id)) throw new Error('Invalid listing id');
     const now = Date.now();
+    if (entry.game === 'poker') {
+      // Players who just sat down are now counted in open_seats: stop also counting their reservations.
+      const previous = this.sql.exec('SELECT open_seats FROM listings WHERE id = ?', entry.id).toArray()[0];
+      const filled = ((previous?.open_seats as number | undefined) ?? entry.maxSeats) - entry.openSeats;
+      if (filled > 0) this.releaseReservations(entry.id, filled);
+      // Listed now, so the finder goes by its real open seats (a full table must not look new).
+      this.freshTables.delete(entry.id);
+    }
     const data = JSON.stringify({ ...entry, updatedAt: now });
     this.sql.exec(
       `INSERT INTO listings (id, status, open_seats, spectators, updated_at, data) VALUES (?, ?, ?, ?, ?, ?)
@@ -187,7 +195,14 @@ export class GameLobby extends DurableObject<Env> {
     const fresh = [...this.freshTables.keys()]
       .filter((id) => !listed.has(id))
       .map((id) => ({ id, open: POKER_MAX_SEATS, waiting: true }));
-    const candidates = [...rows.filter((row) => row.waiting), ...fresh, ...rows.filter((row) => !row.waiting)];
+    // Fullest first, counting players on their way to a seat, so a burst of players lands together.
+    const fullest = (a: { id: string; open: number }, b: { id: string; open: number }) =>
+      a.open - reserved(a.id) - (b.open - reserved(b.id));
+    const candidates = [
+      ...rows.filter((row) => row.waiting).sort(fullest),
+      ...fresh.sort(fullest),
+      ...rows.filter((row) => !row.waiting).sort(fullest),
+    ];
 
     for (const candidate of candidates) {
       if (candidate.open - reserved(candidate.id) > 0) {
@@ -209,6 +224,12 @@ export class GameLobby extends DurableObject<Env> {
 
   private reserve(tableId: string, now: number): void {
     this.reservations.set(tableId, [...(this.reservations.get(tableId) ?? []), now]);
+  }
+
+  private releaseReservations(tableId: string, count: number): void {
+    const remaining = (this.reservations.get(tableId) ?? []).slice(count);
+    if (remaining.length > 0) this.reservations.set(tableId, remaining);
+    else this.reservations.delete(tableId);
   }
 
   private async createPublicTable(): Promise<string> {

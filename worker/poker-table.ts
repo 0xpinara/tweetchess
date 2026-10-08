@@ -70,6 +70,8 @@ const OPEN = 1;
 interface Attachment {
   hash: string | null;
   connectedAt: number;
+  /** Display name sent with hello (used if this guest takes a seat later). */
+  name?: string;
 }
 
 export class PokerTable extends DurableObject<Env> {
@@ -168,7 +170,7 @@ export class PokerTable extends DurableObject<Env> {
     }
 
     const now = Date.now();
-    const result = this.apply(state, hash, msg, now);
+    const result = this.apply(state, hash, msg, now, attachmentOf(ws)?.name ?? DEFAULT_NAME);
     if (!result.ok) {
       sendTo(ws, { type: 'error', code: result.code, message: result.message });
       this.sendState(ws, hash); // resync the sender
@@ -247,7 +249,7 @@ export class PokerTable extends DurableObject<Env> {
       ws.close(CloseCode.RoomFull, 'room_full');
       return;
     }
-    ws.serializeAttachment({ hash, connectedAt: current.connectedAt } satisfies Attachment);
+    ws.serializeAttachment({ hash, connectedAt: current.connectedAt, name: sentName ?? this.nameFor(state, hash) } satisfies Attachment);
     if (seat !== null && state.seats[seat]!.disconnectedAt !== null) {
       state.seats[seat]!.disconnectedAt = null;
       changed = true;
@@ -259,10 +261,10 @@ export class PokerTable extends DurableObject<Env> {
     }
   }
 
-  private apply(state: TableState, hash: string, msg: PokerClientMessage, now: number): EngineResult {
+  private apply(state: TableState, hash: string, msg: PokerClientMessage, now: number, name: string): EngineResult {
     switch (msg.type) {
       case 'sit':
-        return sit(state, hash, this.nameFor(state, hash), now, msg.seat);
+        return sit(state, hash, name, now, msg.seat);
       case 'leave':
         return leave(state, hash, now);
       case 'away':
