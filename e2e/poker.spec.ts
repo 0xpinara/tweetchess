@@ -183,5 +183,14 @@ test('Find a table seats a phone and a desktop player together; others can watch
   expect(watcher.frames.length).toBeGreaterThan(0);
   expect(leakedCards(watcher.frames, dealt)).toEqual([]);
 
+  // Bob is still seated: the homepage offers his table, and he gets his seat and chips back.
+  await bob.page.goto('/');
+  await bob.page.getByRole('link', { name: /Poker\s*Texas Hold'em table/ }).click();
+  await bob.page.waitForURL(tableUrl);
+  await expect(bob.page.locator('.seat.is-me')).toHaveAttribute('aria-label', /^Seat \d: Bob \(you\), \d+ chips/);
+  // Alice left, so hers is gone.
+  await alice.page.goto('/');
+  await expect(alice.page.getByRole('heading', { name: 'Continue your game' })).toHaveCount(0);
+
   await Promise.all([alice, bob, watcher].map((player) => player.page.context().close()));
 });

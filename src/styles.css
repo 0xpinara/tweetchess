@@ -1684,6 +1684,7 @@ input {
 .mini-felt {
   display: grid;
   place-items: center;
+  align-content: center;
   gap: 6px;
   width: 112px;
   aspect-ratio: 1 / 1;
@@ -1696,6 +1697,15 @@ input {
 .mini-board-cards {
   display: flex;
   gap: 2px;
+}
+
+/* Five cards have to fit across the small felt. */
+.mini-board-cards .playing-card.size-small {
+  --card-w: 18px;
+}
+
+.mini-board-cards .card-slot.small {
+  width: 18px;
 }
 
 .mini-pot {

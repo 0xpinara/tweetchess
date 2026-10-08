@@ -58,15 +58,25 @@ test('link-preview tags are in the HTML the server sends (no JavaScript needed)'
 
   const html = await (await request.get(`/game/${roomId}`)).text();
   expect(html).toContain('<meta name="twitter:card" content="summary_large_image"');
-  expect(html).toContain(`<meta property="og:image" content="${baseURL}/og-image.png"`);
-  expect(html).toContain(`<meta name="twitter:image" content="${baseURL}/og-image.png"`);
+  expect(html).toContain(`<meta property="og:image" content="${baseURL}/og-chess.png"`);
+  expect(html).toContain(`<meta name="twitter:image" content="${baseURL}/og-chess.png"`);
   expect(html).toContain(`<meta property="og:url" content="${baseURL}/game/${roomId}"`);
   expect(html).toMatch(/<meta name="twitter:title" content="[^"]+"/);
   expect(html).toMatch(/<meta property="og:description" content="[^"]+"/);
 
-  const image = await request.get('/og-image.png');
-  expect(image.status()).toBe(200);
-  expect(image.headers()['content-type']).toBe('image/png');
+  // Poker table invites get their own title and image.
+  const table = await request.post('/api/poker/tables', { headers: { Origin: baseURL! } });
+  expect(table.status()).toBe(201);
+  const { tableId } = (await table.json()) as { tableId: string };
+  const pokerHtml = await (await request.get(`/poker/table/${tableId}`)).text();
+  expect(pokerHtml).toContain(`<meta name="twitter:image" content="${baseURL}/og-poker.png"`);
+  expect(pokerHtml).toMatch(/<meta property="og:title" content="Join my poker table/);
+
+  for (const file of ['og-image.png', 'og-chess.png', 'og-poker.png']) {
+    const image = await request.get(`/${file}`);
+    expect(image.status(), file).toBe(200);
+    expect(image.headers()['content-type']).toBe('image/png');
+  }
   const robots = await (await request.get('/robots.txt')).text();
   expect(robots).toContain('Allow: /');
 

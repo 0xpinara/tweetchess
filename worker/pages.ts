@@ -8,23 +8,48 @@
 interface PageMeta {
   title: string;
   description: string;
+  image: PreviewImage;
 }
+
+interface PreviewImage {
+  path: string;
+  alt: string;
+}
+
+/** Static 1200×600 images made by scripts/generate-assets.mjs. */
+const IMAGES = {
+  both: {
+    path: '/og-image.png',
+    alt: "Timeline Games: a chessboard and playing cards with the words 'Chess and poker with your timeline'",
+  },
+  chess: {
+    path: '/og-chess.png',
+    alt: "Timeline Games: a chessboard with the words 'Live chess you can share in a post'",
+  },
+  poker: {
+    path: '/og-poker.png',
+    alt: "Timeline Games: playing cards on a poker table with the words 'Texas Hold'em with your timeline'",
+  },
+} satisfies Record<string, PreviewImage>;
 
 const DEFAULT_META: PageMeta = {
   title: 'Timeline Games — chess & poker with your timeline',
   description:
     "Real-time chess and Texas Hold'em in your browser. Find an opponent, invite a friend with a link, or watch games live. Free, no sign-up, play money only.",
+  image: IMAGES.both,
 };
 
 const CHESS_META: PageMeta = {
   title: 'Play chess live · Timeline Games',
   description: 'Find an opponent in seconds, invite a friend with a link, or watch public chess games move by move. Free, no sign-up.',
+  image: IMAGES.chess,
 };
 
 const POKER_META: PageMeta = {
   title: "Texas Hold'em with friends · Timeline Games",
   description:
     "Free play-money Texas Hold'em for 2–6 players. Join a table, invite friends with a link, or watch live. No real money, no sign-up.",
+  image: IMAGES.poker,
 };
 
 /** Returns preview metadata for app routes, or null for anything else. */
@@ -35,6 +60,7 @@ export function pageMeta(pathname: string): PageMeta | null {
       title: 'Play me at chess ♟️ · Timeline Games',
       description:
         'Tap to take the open seat and play live in your browser — or just watch the game in real time. No sign-up, no download.',
+      image: IMAGES.chess,
     };
   }
   if (/^\/poker\/table\/[A-Za-z0-9]{10}$/.test(pathname)) {
@@ -42,6 +68,7 @@ export function pageMeta(pathname: string): PageMeta | null {
       title: 'Join my poker table 🃏 · Timeline Games',
       description:
         "Free play-money Texas Hold'em in your browser. Take a seat and play live, or watch the table. No real money, no sign-up.",
+      image: IMAGES.poker,
     };
   }
   if (pathname === '/world') {
@@ -49,12 +76,14 @@ export function pageMeta(pathname: string): PageMeta | null {
       title: 'The World Board ♟️ · Timeline Games',
       description:
         'One public chessboard for everyone. Grab a seat when it opens and play live while the whole internet watches.',
+      image: IMAGES.chess,
     };
   }
   if (pathname === '/local') {
     return {
       title: 'Pass-and-play chess · Timeline Games',
       description: 'Play chess with a friend on one device. Legal moves, check, checkmate and draws handled for you.',
+      image: IMAGES.chess,
     };
   }
   if (pathname === '/chess' || pathname === '/chess/matchmaking') return CHESS_META;
@@ -63,6 +92,7 @@ export function pageMeta(pathname: string): PageMeta | null {
     return {
       title: 'Watch live chess & poker · Timeline Games',
       description: 'Browse public chess games and poker tables happening right now and watch them live.',
+      image: IMAGES.both,
     };
   }
   return null;
@@ -76,7 +106,7 @@ export async function renderPage(request: Request, env: Env): Promise<Response> 
   if (!(asset.headers.get('Content-Type') ?? '').includes('text/html')) return asset;
 
   const canonical = `${url.origin}${url.pathname}`;
-  const image = `${url.origin}/og-image.png`;
+  const image = `${url.origin}${meta.image.path}`;
   const content = (value: string): HTMLRewriterElementContentHandlers => ({
     element(element) {
       element.setAttribute('content', value);
@@ -101,9 +131,11 @@ export async function renderPage(request: Request, env: Env): Promise<Response> 
     .on('meta[property="og:title"]', content(meta.title))
     .on('meta[property="og:description"]', content(meta.description))
     .on('meta[property="og:image"]', content(image))
+    .on('meta[property="og:image:alt"]', content(meta.image.alt))
     .on('meta[name="twitter:title"]', content(meta.title))
     .on('meta[name="twitter:description"]', content(meta.description))
     .on('meta[name="twitter:image"]', content(image))
+    .on('meta[name="twitter:image:alt"]', content(meta.image.alt))
     .transform(asset);
 
   const headers = new Headers(rewritten.headers);
