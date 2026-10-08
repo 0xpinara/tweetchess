@@ -44,7 +44,11 @@ interface PendingMove {
 type Tone = 'info' | 'success' | 'warning' | 'danger';
 
 export function OnlineGamePage({ roomId }: { roomId: string }) {
-  const { status, state, role, notice, fatal, retryAt, syncId, receivedAt, send, retryNow } = useRoom(roomId);
+  // Links from the live directory add ?watch=1: watch without taking a free seat.
+  const [watchOnly] = useState(() => new URLSearchParams(window.location.search).has('watch'));
+  const { status, state, role, notice, fatal, retryAt, syncId, receivedAt, send, retryNow } = useRoom(roomId, {
+    autoSit: !watchOnly,
+  });
   const [pending, setPending] = useState<PendingMove | null>(null);
   const [flipped, setFlipped] = useState(false);
   const [localToast, setLocalToast] = useState<{ id: number; text: string } | null>(null);

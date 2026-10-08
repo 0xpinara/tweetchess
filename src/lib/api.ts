@@ -1,8 +1,15 @@
-/** Ask the server for a brand-new private room. Returns its ID. */
-export async function createRoom(): Promise<string> {
+/**
+ * Ask the server for a brand-new friend game. Returns its ID.
+ * `listed: true` also shows it in the public live-games directory.
+ */
+export async function createRoom(options: { listed?: boolean } = {}): Promise<string> {
   let response: Response;
   try {
-    response = await fetch('/api/rooms', { method: 'POST' });
+    response = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ listed: Boolean(options.listed) }),
+    });
   } catch {
     throw new Error('Could not reach TweetChess. Check your connection and try again.');
   }

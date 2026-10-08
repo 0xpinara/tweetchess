@@ -9,6 +9,7 @@
  *   of room behaves (timers, seating, expiry) lives in policies.ts.
  */
 import { DurableObject } from 'cloudflare:workers';
+import type { LiveChessGame } from '../shared/lobby.ts';
 import { DEFAULT_NAME, sanitizeDisplayName } from '../shared/names.ts';
 import {
   CloseCode,
@@ -61,6 +62,8 @@ export const WORLD_TURN_LIMIT_MS = POLICIES.world.turnLimitMs!;
 export const WORLD_POSTGAME_MS = POLICIES.world.rotateSeatsAfterMs!;
 /** When nobody is connected, re-check an idle room's expiry at most this often. */
 const EXPIRY_RECHECK_MS = 60 * 60 * 1000;
+/** Routine directory updates (moves, spectator counts) are sent at most this often (mutable for tests). */
+export const DIRECTORY = { publishIntervalMs: 20_000 };
 /** Per-socket token bucket: burst of 20 messages, refilled at 5 per second. */
 const RATE_BURST = 20;
 const RATE_PER_SECOND = 5;
@@ -93,6 +96,9 @@ export class ChessRoom extends DurableObject<Env> {
   private storedPly = 0;
   /** The alarm time this instance last scheduled (unknown after a wake-up). */
   private alarmAt: number | null = null;
+  /** Last directory update (in memory; after a wake-up the next change is always sent). */
+  private lastPublishedAt = 0;
+  private lastPublishedKey = '';
   private readonly buckets = new WeakMap<WebSocket, { tokens: number; at: number }>();
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -133,6 +139,7 @@ export class ChessRoom extends DurableObject<Env> {
     this.storedPly = 0;
     this.save();
     this.scheduleAlarm();
+    this.publish();
     return true;
   }
 
@@ -215,6 +222,7 @@ export class ChessRoom extends DurableObject<Env> {
     }
     this.save();
     this.broadcastState();
+    this.publish();
     if (hasGameTimers(match.policy)) this.scheduleAlarm();
   }
 
@@ -240,10 +248,12 @@ export class ChessRoom extends DurableObject<Env> {
     if (this.applyTimers(match, now)) {
       this.save();
       this.broadcastState();
+      this.publish();
     }
 
     const { ttlMs } = match.policy;
     if (ttlMs !== null && now - match.record.updatedAt >= ttlMs && this.ctx.getWebSockets().length === 0) {
+      if (match.record.listed) await this.env.LOBBY.getByName('chess').unpublish(match.record.roomId).catch(() => {});
       // Removes the SQLite database and (since 2026-02-24) the alarm too.
       await this.ctx.storage.deleteAll();
       this.match = null;
@@ -307,6 +317,7 @@ export class ChessRoom extends DurableObject<Env> {
       this.sendState(ws, hash);
       this.broadcastPresence({ skip: ws });
     }
+    this.publish();
   }
 
   private apply(match: Match, hash: string, msg: ClientMessage, now: number, name: string): ActionResult {
@@ -348,6 +359,51 @@ export class ChessRoom extends DurableObject<Env> {
       }
     }
     this.broadcastPresence({ departed: ws });
+    this.publish(ws);
+  }
+
+  // ------------------------------------------------------------ Directory
+
+  /** This room's public summary, or null if it shouldn't be listed right now. */
+  private listing(departed?: WebSocket): LiveChessGame | null {
+    const match = this.match;
+    if (!match || !match.record.listed || match.record.status === 'over') return null;
+    const { record } = match;
+    const openSeats = match.policy.openSeating ? COLORS.filter((color) => !match.seat(color)).length : 0;
+    return {
+      game: 'chess',
+      id: record.roomId,
+      mode: record.kind === 'private' ? 'friend' : record.kind,
+      status: record.status === 'active' ? 'playing' : 'waiting',
+      players: { w: record.names.w, b: record.names.b },
+      moveNumber: Math.floor(match.ply / 2) + 1,
+      turn: match.turn(),
+      fen: record.fen,
+      spectators: this.presence(departed).spectators,
+      openSeats,
+      updatedAt: Date.now(),
+    };
+  }
+
+  /**
+   * Keep the public directory up to date. Status/seat changes go out at once;
+   * routine changes (moves, spectator counts) at most every 20 seconds, which
+   * keeps directory traffic small on the free plan. Failures are harmless:
+   * the next update repeats the state, and stale entries expire.
+   */
+  private publish(departed?: WebSocket): void {
+    const match = this.match;
+    if (!match?.record.listed) return;
+    const entry = this.listing(departed);
+    const key = entry ? `${entry.status}|${entry.openSeats}|${entry.players.w}|${entry.players.b}` : 'removed';
+    const now = Date.now();
+    if (key === this.lastPublishedKey && now - this.lastPublishedAt < DIRECTORY.publishIntervalMs) return;
+    if (key === 'removed' && this.lastPublishedKey === 'removed') return;
+    this.lastPublishedAt = now;
+    this.lastPublishedKey = key;
+    const lobby = this.env.LOBBY.getByName('chess');
+    const update = entry ? lobby.publish(entry) : lobby.unpublish(match.record.roomId);
+    this.ctx.waitUntil(update.catch((error: unknown) => console.error('directory update failed', error)));
   }
 
   // -------------------------------------------------------------- Timers
@@ -621,6 +677,7 @@ export class ChessRoom extends DurableObject<Env> {
     this.storedPly = 0;
     this.save();
     this.scheduleAlarm(now);
+    this.publish();
     return this.match;
   }
 

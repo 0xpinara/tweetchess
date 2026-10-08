@@ -44,8 +44,12 @@ export function socketUrl(roomId: string): string {
   return wsUrl(`/api/rooms/${encodeURIComponent(roomId)}/ws`);
 }
 
-/** Live connection to one chess room (the page remounts it per room via a React key). */
-export function useRoom(roomId: string): RoomConnection {
+/**
+ * Live connection to one chess room (the page remounts it per room via a React key).
+ * `autoSit: false` (watch links) never takes a free seat, so spectating can't change who plays.
+ */
+export function useRoom(roomId: string, options: { autoSit?: boolean } = {}): RoomConnection {
+  const autoSit = options.autoSit !== false;
   const [state, setState] = useState<RoomSnapshot | null>(null);
   const [role, setRole] = useState<Role | null>(null);
   const [notice, setNotice] = useState<RoomNotice | null>(null);
@@ -61,7 +65,7 @@ export function useRoom(roomId: string): RoomConnection {
       type: 'hello',
       token: getGuestToken(),
       protocol: PROTOCOL_VERSION,
-      sit: !reconnect && !hasLeftRoom(roomId),
+      sit: autoSit && !reconnect && !hasLeftRoom(roomId),
       name: getDisplayName(),
     }),
     onMessage: (raw, control) => {

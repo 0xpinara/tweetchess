@@ -1,6 +1,11 @@
 /**
  * GameLobby — one Durable Object per game type ("chess", "poker").
  *
+ * Both instances keep the public live-games directory for their game: rooms
+ * that are listed push small summaries here (throttled), visitors read them
+ * in pages. Entries carry no player identities, and stale ones expire, so a
+ * room that crashed or was deleted without saying goodbye disappears anyway.
+ *
  * Chess instance: the matchmaking coordinator. Waiting players hold a
  * hibernatable WebSocket; the queue is derived from those sockets, so closing
  * the browser leaves the queue automatically and nothing stale survives.
@@ -13,8 +18,12 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import {
+  LIVE_PAGE_SIZE,
   LOBBY_PROTOCOL_VERSION,
   parseMatchmakingMessage,
+  type LiveFilter,
+  type LiveGame,
+  type LivePage,
   type MatchmakingClientMessage,
   type MatchmakingServerMessage,
 } from '../shared/lobby.ts';
@@ -31,6 +40,12 @@ export const LOBBY_LIMITS = {
 const MATCH_MEMORY_MS = 6 * 60 * 60 * 1000;
 /** Old pairing records are cleaned up after this long. */
 const MATCH_RETENTION_MS = 24 * 60 * 60 * 1000;
+/** Directory entries not refreshed for this long are hidden and later deleted. */
+export const LISTING_STALE_MS = 30 * 60 * 1000;
+/** How often stale directory entries are purged (only while there are entries). */
+const LISTING_PURGE_MS = 10 * 60 * 1000;
+/** Upper bound on directory size per game type (oldest entries are dropped). */
+const MAX_LISTINGS = 1000;
 /** After a failed room creation, try pairing again this soon. */
 const PAIRING_RETRY_MS = 5_000;
 const RATE_BURST = 10;
@@ -73,6 +88,64 @@ export class GameLobby extends DurableObject<Env> {
       state TEXT NOT NULL,
       created_at INTEGER NOT NULL
     )`);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS listings (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      open_seats INTEGER NOT NULL,
+      spectators INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      data TEXT NOT NULL
+    )`);
+    this.sql.exec('CREATE INDEX IF NOT EXISTS listings_rank ON listings (spectators DESC, updated_at DESC)');
+  }
+
+  // ------------------------------------------------- Live directory (RPC)
+
+  /** Add or refresh a public game's summary. Called by game rooms. */
+  async publish(entry: LiveGame): Promise<void> {
+    const game = this.ctx.id.name;
+    if (game && entry.game !== game) throw new Error(`Listing for ${entry.game} sent to the ${game} lobby`);
+    if (!/^[A-Za-z0-9]{1,16}$/.test(entry.id)) throw new Error('Invalid listing id');
+    const now = Date.now();
+    const data = JSON.stringify({ ...entry, updatedAt: now });
+    this.sql.exec(
+      `INSERT INTO listings (id, status, open_seats, spectators, updated_at, data) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET status = excluded.status, open_seats = excluded.open_seats,
+         spectators = excluded.spectators, updated_at = excluded.updated_at, data = excluded.data`,
+      entry.id, entry.status, entry.openSeats, entry.spectators, now, data,
+    );
+    const count = this.sql.exec('SELECT COUNT(*) AS n FROM listings').one().n as number;
+    if (count > MAX_LISTINGS) {
+      this.sql.exec(
+        'DELETE FROM listings WHERE id IN (SELECT id FROM listings ORDER BY updated_at ASC LIMIT ?)',
+        count - MAX_LISTINGS,
+      );
+    }
+    this.scheduleAlarm(now + LISTING_PURGE_MS);
+  }
+
+  /** Remove a game from the directory (it ended, was deleted, or became private). */
+  async unpublish(id: string): Promise<void> {
+    this.sql.exec('DELETE FROM listings WHERE id = ?', id);
+  }
+
+  /** One page of fresh public games, most-watched first. */
+  async list(query: { filter: LiveFilter; offset: number; limit?: number }): Promise<LivePage> {
+    const limit = Math.min(Math.max(query.limit ?? LIVE_PAGE_SIZE, 1), 50);
+    const offset = Math.min(Math.max(query.offset, 0), MAX_LISTINGS);
+    const conditions = ['updated_at > ?'];
+    if (query.filter === 'waiting') conditions.push("status = 'waiting'");
+    if (query.filter === 'playing') conditions.push("status = 'playing'");
+    if (query.filter === 'open') conditions.push('open_seats > 0');
+    const rows = this.sql
+      .exec(
+        `SELECT data FROM listings WHERE ${conditions.join(' AND ')}
+         ORDER BY spectators DESC, updated_at DESC LIMIT ? OFFSET ?`,
+        Date.now() - LISTING_STALE_MS, limit + 1, offset,
+      )
+      .toArray();
+    const games = rows.slice(0, limit).map((row) => JSON.parse(row.data as string) as LiveGame);
+    return { games, nextCursor: rows.length > limit ? String(offset + limit) : null };
   }
 
   // ------------------------------------------------------ Matchmaking (WebSocket)
@@ -274,14 +347,17 @@ export class GameLobby extends DurableObject<Env> {
 
   // ------------------------------------------------------------------ Alarm
 
-  /** Retries a failed pairing and deletes old pairing records. */
+  /** Retries a failed pairing, deletes old pairing records and purges stale listings. */
   async alarm(): Promise<void> {
     this.alarmAt = null;
     const now = Date.now();
     this.sql.exec('DELETE FROM matches WHERE created_at < ?', now - MATCH_RETENTION_MS);
+    this.sql.exec('DELETE FROM listings WHERE updated_at < ?', now - LISTING_STALE_MS);
     await this.pairWaitingPlayers();
     const oldest = this.sql.exec('SELECT MIN(created_at) AS t FROM matches').one().t as number | null;
     if (oldest !== null) this.scheduleAlarm(oldest + MATCH_RETENTION_MS);
+    const listings = this.sql.exec('SELECT COUNT(*) AS n FROM listings').one().n as number;
+    if (listings > 0) this.scheduleAlarm(now + LISTING_PURGE_MS);
   }
 
   /** Keep a single alarm at the earliest time anything needs doing. */

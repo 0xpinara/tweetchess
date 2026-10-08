@@ -56,3 +56,42 @@ test('searching can be cancelled', async ({ page }) => {
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByRole('button', { name: 'Find a match' })).toBeVisible();
 });
+
+test('public games appear in the live directory and can be watched without changing seats', async ({ browser }) => {
+  const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext()]);
+  const [carol, dave, viewer] = await Promise.all(contexts.map((context) => context.newPage()));
+
+  for (const [page, name] of [
+    [carol, 'Carol'],
+    [dave, 'Dave'],
+  ] as const) {
+    await page.goto('/chess/matchmaking');
+    await setName(page, name);
+    await page.getByRole('button', { name: 'Find a match' }).click();
+  }
+  await carol.waitForURL(/\/game\//);
+  await dave.waitForURL(/\/game\//);
+  const carolIsWhite = (await statusTitle(carol).textContent()) === 'Your move';
+  const [white, black] = carolIsWhite ? [carol, dave] : [dave, carol];
+
+  // The directory lists the game (it refreshes on its own; Refresh speeds it up).
+  await viewer.goto('/chess/live');
+  const card = viewer.locator('.live-card', { hasText: 'Carol' }).filter({ hasText: 'Dave' });
+  await expect(async () => {
+    await viewer.getByRole('button', { name: 'Refresh' }).click();
+    await expect(card).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
+  await expect(card).toContainText('Matchmade');
+
+  await card.getByRole('link', { name: 'Watch live' }).click();
+  await viewer.waitForURL(/\/game\/[A-Za-z0-9]{10}\?watch=1$/);
+  await expect(statusTitle(viewer)).toHaveText('White to move');
+  await expect(viewer.locator('.status-detail')).toContainText("You're watching live");
+
+  await clickMove(white, 'd2', 'd4');
+  await expect(pieceAt(viewer, 'd4', 'wP')).toBeVisible();
+  // Watching changed nobody's seat.
+  await expect(statusTitle(black)).toHaveText('Your move');
+  await expect(statusTitle(white)).toHaveText("Opponent's move");
+  await Promise.all(contexts.map((context) => context.close()));
+});

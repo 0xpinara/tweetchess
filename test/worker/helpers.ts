@@ -154,3 +154,39 @@ export async function playMove(
   player.send(promotion ? { type: 'move', from, to, promotion, expectedPly } : { type: 'move', from, to, expectedPly });
   return observer.nextState((s) => s.state.ply === expectedPly + 1);
 }
+
+/** Connect to the chess matchmaking lobby. */
+export async function connectLobby(): Promise<TestClient> {
+  const response = await exports.default.fetch(`${ORIGIN}/api/matchmaking/chess/ws`, { headers: { Upgrade: 'websocket' } });
+  expect(response.status).toBe(101);
+  const ws = response.webSocket!;
+  const client = new TestClient(ws);
+  ws.accept();
+  return client;
+}
+
+/** Two guests matched through the lobby; returns the room and their tokens by colour. */
+export async function matchPair(names: [string, string] = ['Alice', 'Bob']) {
+  const tokens = [newToken(), newToken()];
+  const clients = await Promise.all(tokens.map(() => connectLobby()));
+  clients.forEach((client, index) => client.send({ type: 'hello', token: tokens[index], protocol: 1, name: names[index] }));
+  await Promise.all(clients.map((client) => client.next((m) => (m as { type: string }).type === 'welcome')));
+  for (const client of clients) client.send({ type: 'queue' });
+  const results = (await Promise.all(
+    clients.map((client) => client.next((m) => (m as { type: string }).type === 'matched')),
+  )) as unknown as { roomId: string; color: 'w' | 'b' }[];
+  for (const client of clients) client.close();
+  const whiteIndex = results[0].color === 'w' ? 0 : 1;
+  return { roomId: results[0].roomId, white: tokens[whiteIndex], black: tokens[1 - whiteIndex] };
+}
+
+/** Poll until `check` passes (directory updates are asynchronous). */
+export async function eventually<T>(read: () => Promise<T>, check: (value: T) => boolean, timeoutMs = 3000): Promise<T> {
+  const started = Date.now();
+  for (;;) {
+    const value = await read();
+    if (check(value)) return value;
+    if (Date.now() - started > timeoutMs) throw new Error(`Condition not met in ${timeoutMs} ms: ${JSON.stringify(value)}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}

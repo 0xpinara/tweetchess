@@ -1183,6 +1183,306 @@ input {
   font-size: 14px;
 }
 
+/* ----------------------------------------------------- Live directory */
+
+.live-page {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+  display: grid;
+  gap: 16px;
+}
+
+.live-header h1 {
+  font-size: clamp(26px, 5vw, 36px);
+  letter-spacing: -0.03em;
+}
+
+.live-header p {
+  color: var(--text-muted);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tab {
+  padding: 8px 16px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-weight: 700;
+  font-size: 15px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.tab[aria-current='page'] {
+  background: var(--accent);
+  color: #fff;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.chip[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: #8fd0fc;
+}
+
+.live-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.live-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 14px;
+}
+
+.live-card {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 14px;
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.live-card-media {
+  align-self: start;
+}
+
+.live-card-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.live-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.game-tag,
+.mode-tag {
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.game-tag-chess {
+  background: var(--accent-soft);
+  color: #8fd0fc;
+}
+
+.game-tag-poker {
+  background: var(--success-soft);
+  color: #4fdcae;
+}
+
+.mode-tag {
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+
+.live-title {
+  font-size: 16px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.versus {
+  color: var(--text-faint);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.live-detail,
+.live-meta {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.live-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.live-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.empty-state {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  padding: 32px 16px;
+  border-radius: var(--radius);
+  border: 1px dashed var(--border-strong);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.mini-board {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  width: 112px;
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.mini-sq {
+  position: relative;
+}
+
+.mini-sq.light {
+  background: var(--board-light);
+}
+
+.mini-sq.dark {
+  background: var(--board-dark);
+}
+
+.mini-piece,
+.mini-piece svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ----------------------------------------------------- Playing cards */
+
+.playing-card {
+  --card-w: 40px;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  align-content: center;
+  width: var(--card-w);
+  aspect-ratio: 5 / 7;
+  border-radius: calc(var(--card-w) * 0.12);
+  background: #fdfdfb;
+  color: #17202a;
+  box-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.25),
+    0 3px 8px rgba(0, 0, 0, 0.35);
+  font-weight: 800;
+  line-height: 1;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.playing-card.red {
+  color: #d1202f;
+}
+
+.playing-card .card-rank {
+  font-size: calc(var(--card-w) * 0.42);
+  letter-spacing: -0.04em;
+}
+
+.playing-card .card-suit {
+  font-size: calc(var(--card-w) * 0.38);
+}
+
+.playing-card.size-small {
+  --card-w: 22px;
+}
+
+.playing-card.size-large {
+  --card-w: 54px;
+}
+
+.playing-card.face-down {
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.14) 0 4px, transparent 4px 8px),
+    linear-gradient(135deg, #1d9bf0, #0b5e9a);
+  border: 2px solid #fff;
+}
+
+.playing-card.is-highlight {
+  box-shadow:
+    0 0 0 2px var(--warning),
+    0 3px 10px rgba(0, 0, 0, 0.4);
+}
+
+.card-slot {
+  display: inline-block;
+  width: 40px;
+  aspect-ratio: 5 / 7;
+  border-radius: 5px;
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+}
+
+.card-slot.small {
+  width: 22px;
+  border-radius: 3px;
+}
+
+.mini-felt {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  width: 112px;
+  aspect-ratio: 1 / 1;
+  padding: 8px 4px;
+  border-radius: 50% / 40%;
+  background: radial-gradient(ellipse at center, #1f7a4d, #0f4d30 75%);
+  border: 3px solid #4a2f1b;
+}
+
+.mini-board-cards {
+  display: flex;
+  gap: 2px;
+}
+
+.mini-pot {
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
 /* ------------------------------------------------- Narrow screens */
 
 @media (max-width: 420px) {

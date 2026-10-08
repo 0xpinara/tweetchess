@@ -5,11 +5,13 @@
  *   POST /api/rooms                  → create a friend chess game ({ listed?: boolean })
  *   GET  /api/rooms/:id/ws           → WebSocket into the chess room's Durable Object
  *   GET  /api/matchmaking/chess/ws   → WebSocket into the chess matchmaking lobby
+ *   GET  /api/live                   → public live-games directory (paginated)
  *   GET  /, /game/:id, /world…       → the React app, with link-preview tags
  *
  * Static files (JS, CSS, images) are served by Cloudflare's asset handler
  * without invoking this Worker at all.
  */
+import { LIVE_PAGE_SIZE, isLiveFilter, type LiveGame, type LivePage } from '../shared/lobby.ts';
 import { CloseCode, isValidRoomId } from '../shared/protocol.ts';
 import { ChessRoom, rejectSocket } from './chess-room.ts';
 import { randomRoomId } from './crypto.ts';
@@ -41,6 +43,11 @@ export default {
     if (socketRoute) return connect(request, env, url, socketRoute[1]);
 
     if (pathname === '/api/matchmaking/chess/ws') return connectLobby(request, env, url, 'chess');
+
+    if (pathname === '/api/live') {
+      if (request.method !== 'GET') return json({ error: 'method_not_allowed' }, 405, { Allow: 'GET' });
+      return liveGames(url, env);
+    }
 
     if (pathname.startsWith('/api/')) return json({ error: 'not_found' }, 404);
 
@@ -112,6 +119,59 @@ async function connectLobby(request: Request, env: Env, url: URL, lobby: 'chess'
       'Matchmaking is temporarily unavailable (it may have reached its free daily limit). Please try again later.',
     );
   }
+}
+
+/**
+ * Short in-memory cache for directory pages. Many visitors refreshing the
+ * lobby at once then cost one Durable Object call per few seconds (per
+ * Worker instance) instead of one each.
+ */
+export const LIVE_CACHE = { ttlMs: 5_000 };
+const liveCache = new Map<string, { at: number; body: LivePage }>();
+
+async function liveGames(url: URL, env: Env): Promise<Response> {
+  const game = url.searchParams.get('game') ?? 'all';
+  const filterParam = url.searchParams.get('filter') ?? 'all';
+  const cursor = url.searchParams.get('cursor') ?? '';
+  if (game !== 'all' && game !== 'chess' && game !== 'poker') return json({ error: 'invalid_game' }, 400);
+  if (!isLiveFilter(filterParam)) return json({ error: 'invalid_filter' }, 400);
+  // Single game: "<offset>". All games: "<chessOffset>,<pokerOffset>" where -1 means "no more".
+  const cursorPattern = game === 'all' ? /^-?\d{1,4},-?\d{1,4}$/ : /^\d{1,4}$/;
+  if (cursor && !cursorPattern.test(cursor)) return json({ error: 'invalid_cursor' }, 400);
+
+  const key = `${game}|${filterParam}|${cursor}`;
+  const cached = liveCache.get(key);
+  if (cached && Date.now() - cached.at < LIVE_CACHE.ttlMs) return json(cached.body, 200, { 'Cache-Control': 'max-age=5' });
+
+  let body: LivePage;
+  try {
+    if (game === 'all') {
+      // One page from each game type, merged; the cursor carries both offsets ("-1" = done).
+      const [chessOffset, pokerOffset] = (cursor || '0,0').split(',').map((part) => Number(part));
+      const half = Math.ceil(LIVE_PAGE_SIZE / 2);
+      const [chess, poker] = await Promise.all([
+        chessOffset >= 0 ? env.LOBBY.getByName('chess').list({ filter: filterParam, offset: chessOffset, limit: half }) : null,
+        pokerOffset >= 0 ? env.LOBBY.getByName('poker').list({ filter: filterParam, offset: pokerOffset, limit: half }) : null,
+      ]);
+      const games: LiveGame[] = [...(chess?.games ?? []), ...(poker?.games ?? [])].sort(
+        (a, b) => b.spectators - a.spectators || b.updatedAt - a.updatedAt,
+      );
+      const nextChess = chess?.nextCursor ?? null;
+      const nextPoker = poker?.nextCursor ?? null;
+      body = {
+        games,
+        nextCursor: nextChess !== null || nextPoker !== null ? `${nextChess ?? -1},${nextPoker ?? -1}` : null,
+      };
+    } else {
+      body = await env.LOBBY.getByName(game).list({ filter: filterParam, offset: cursor ? Number(cursor) : 0 });
+    }
+  } catch (error) {
+    console.error('live directory failed', error);
+    return json({ error: 'unavailable', message: 'The live games list is temporarily unavailable.' }, 503);
+  }
+  if (liveCache.size > 200) liveCache.clear();
+  liveCache.set(key, { at: Date.now(), body });
+  return json(body, 200, { 'Cache-Control': 'max-age=5' });
 }
 
 /**
