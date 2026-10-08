@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------------ */
-/* TweetChess — dark, mobile-first theme                              */
+/* Timeline Games — dark, mobile-first theme                          */
 /* ------------------------------------------------------------------ */
 
 :root {
@@ -904,27 +904,6 @@ input {
   padding: 24px 16px 40px;
 }
 
-.hero {
-  display: grid;
-  gap: 32px;
-  align-items: center;
-  padding: 16px 0 40px;
-}
-
-@media (min-width: 900px) {
-  .hero {
-    grid-template-columns: 1.1fr 0.9fr;
-    gap: 56px;
-    padding: 48px 0 64px;
-  }
-}
-
-.hero-copy {
-  display: grid;
-  gap: 18px;
-  justify-items: start;
-}
-
 .eyebrow {
   padding: 4px 12px;
   border-radius: 999px;
@@ -936,7 +915,7 @@ input {
   letter-spacing: 0.02em;
 }
 
-.hero h1 {
+.home-hero h1 {
   font-size: clamp(36px, 7.5vw, 64px);
   line-height: 1.04;
   letter-spacing: -0.035em;
@@ -964,23 +943,6 @@ input {
 
 .cta-row-center {
   justify-content: center;
-}
-
-.hero-board {
-  width: 100%;
-  max-width: 460px;
-  justify-self: center;
-}
-
-.hero-board-inner {
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.06),
-    0 30px 60px rgba(0, 0, 0, 0.5),
-    0 0 80px rgba(29, 155, 240, 0.18);
-  transform: perspective(1200px) rotateX(8deg) rotateZ(-2deg);
-  pointer-events: none;
 }
 
 .section-title {
@@ -1082,6 +1044,266 @@ input {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* --------------------------------------------------- Navigation, home */
+
+.site-nav {
+  display: flex;
+  gap: 2px;
+  margin-right: auto;
+  margin-left: 12px;
+}
+
+.site-nav-link {
+  padding: 6px 12px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-weight: 700;
+  font-size: 15px;
+  text-decoration: none;
+}
+
+.site-nav-link:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.site-nav-link[aria-current='page'] {
+  color: var(--text);
+  background: var(--surface-3);
+}
+
+.home-hero {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  padding: 24px 0 32px;
+  text-align: center;
+}
+
+.home-hero h1 {
+  max-width: 16em;
+  font-size: clamp(32px, 6.5vw, 58px);
+  line-height: 1.06;
+  letter-spacing: -0.035em;
+  font-weight: 850;
+}
+
+.home-hero .lede {
+  max-width: 36em;
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.continue {
+  margin-bottom: 24px;
+}
+
+.continue-list {
+  display: grid;
+  gap: 8px;
+}
+
+.continue-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(29, 155, 240, 0.45);
+  background: var(--accent-soft);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.continue-item span:last-child {
+  margin-left: auto;
+}
+
+.game-choices {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 36px;
+}
+
+@media (min-width: 820px) {
+  .game-choices {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.game-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  padding: 20px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.chess-choice {
+  background: linear-gradient(160deg, rgba(29, 155, 240, 0.12), var(--surface) 55%);
+}
+
+.poker-choice {
+  background: linear-gradient(160deg, rgba(0, 186, 124, 0.12), var(--surface) 55%);
+}
+
+.game-choice h2 {
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+.game-choice-body {
+  display: grid;
+  gap: 10px;
+}
+
+.game-choice-body > p {
+  color: var(--text-muted);
+}
+
+.game-choice-art .mini-board {
+  width: 96px;
+}
+
+.hero-cards {
+  display: flex;
+  justify-content: center;
+}
+
+.hero-cards .playing-card:first-child {
+  transform: rotate(-8deg) translateX(8px);
+}
+
+.hero-cards .playing-card:last-child {
+  transform: rotate(8deg) translateX(-8px);
+}
+
+.choice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.choice-more {
+  font-size: 14px;
+  color: var(--text-faint);
+}
+
+.live-now {
+  margin-bottom: 36px;
+}
+
+.friend-panel {
+  display: grid;
+  gap: 10px;
+  flex-basis: 100%;
+  padding: 14px;
+  border-radius: var(--radius-small);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+}
+
+.friend-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* -------------------------------------------------------- Landing pages */
+
+.landing {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  display: grid;
+  gap: 24px;
+}
+
+.landing-header {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+}
+
+.landing-header h1 {
+  font-size: clamp(30px, 6vw, 46px);
+  letter-spacing: -0.03em;
+}
+
+.landing-actions {
+  display: grid;
+  gap: 14px;
+}
+
+@media (min-width: 820px) {
+  .landing-actions {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.action-card {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.action-card h2 {
+  font-size: 19px;
+}
+
+.action-card > p {
+  color: var(--text-muted);
+  font-size: 15px;
+}
+
+.action-card .btn {
+  justify-self: start;
+}
+
+.landing-more {
+  display: grid;
+  gap: 12px;
+}
+
+@media (min-width: 640px) {
+  .landing-more {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.more-card {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  text-decoration: none;
+}
+
+.more-card span {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.more-card:hover {
+  border-color: var(--border-strong);
 }
 
 /* ------------------------------------------------------ Name editor */
@@ -1514,6 +1736,29 @@ input {
   .btn {
     padding: 8px 14px;
     font-size: 14px;
+  }
+}
+
+@media (max-width: 520px) {
+  .site-nav {
+    margin-left: 4px;
+  }
+
+  .site-nav-link {
+    padding: 6px 9px;
+    font-size: 14px;
+  }
+
+  .app-header:has(.site-nav) .brand-name {
+    display: none;
+  }
+
+  .game-choice {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .game-choice-art {
+    display: none;
   }
 }
 

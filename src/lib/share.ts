@@ -19,7 +19,7 @@ export function xIntentUrl(text: string, url: string): string {
 
 export function shareText(roomId: string): string {
   return roomId === WORLD_ROOM_ID
-    ? 'Come play on the TweetChess World Board ♟️ — grab a seat or watch live:'
+    ? 'Come play on the Timeline Games World Board ♟️ — grab a seat or watch live:'
     : 'Play me at chess ♟️ First to click gets the open seat — everyone else can watch live:';
 }
 

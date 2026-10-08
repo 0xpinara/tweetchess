@@ -84,13 +84,14 @@ test('narrow embedded-browser widths never scroll sideways', async ({ browser })
   for (const width of [320, 360, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 640 }, hasTouch: true, isMobile: true });
     const page = await context.newPage();
-    for (const route of ['/', '/local']) {
+    for (const route of ['/', '/local', '/chess', '/live', '/chess/matchmaking']) {
       await page.goto(route);
       await page.waitForLoadState('networkidle');
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       expect(overflow, `${route} at ${width}px`).toBeLessThanOrEqual(0);
     }
     // The whole board fits on screen on a phone.
+    await page.goto('/local');
     const board = await page.locator('.board-frame').boundingBox();
     expect(board!.width).toBeGreaterThanOrEqual(width - 40);
     expect(board!.x + board!.width).toBeLessThanOrEqual(width);
@@ -98,12 +99,29 @@ test('narrow embedded-browser widths never scroll sideways', async ({ browser })
   }
 });
 
-test('home page has working calls to action', async ({ page }) => {
+test('homepage offers chess and poker and links everywhere', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('Chess you can share');
-  await page.getByRole('link', { name: /pass-and-play/ }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Play real-time games');
+  await expect(page.getByRole('heading', { name: 'Chess', level: 2 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Poker', level: 2 })).toBeVisible();
+  await page.getByRole('link', { name: 'Find a match' }).click();
+  await expect(page).toHaveURL(/\/chess\/matchmaking$/);
+  await page.goBack();
+  await page.getByRole('link', { name: 'Pass-and-play' }).click();
   await expect(page).toHaveURL(/\/local$/);
   await page.goBack();
-  await page.getByRole('link', { name: 'Join the World Board' }).click();
+  await page.getByRole('link', { name: 'World Board' }).click();
   await expect(page).toHaveURL(/\/world$/);
+  await page.goto('/');
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Live' }).click();
+  await expect(page).toHaveURL(/\/live$/);
+});
+
+test('play with a friend creates a private, unlisted game by default', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Play with a friend' }).click();
+  await expect(page.getByLabel('Let anyone watch from the Live page')).not.toBeChecked();
+  await page.getByRole('button', { name: 'Create invite link' }).click();
+  await page.waitForURL(/\/game\/[A-Za-z0-9]{10}$/);
+  await expect(page.locator('.room-code')).toHaveText('Private game');
 });

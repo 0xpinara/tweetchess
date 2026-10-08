@@ -7,7 +7,6 @@ import { KeyboardPanel } from '../components/KeyboardPanel.tsx';
 import { MoveList } from '../components/MoveList.tsx';
 import { PlayerBar } from '../components/PlayerBar.tsx';
 import { capturedBy, describeEnd, materialBalance, spokenMove, type MoveIntent } from '../lib/chess-ui.ts';
-import { Link } from '../components/Link.tsx';
 
 interface LocalSnapshot {
   fen: string;
@@ -42,7 +41,7 @@ export function LocalGamePage() {
   const [announcement, setAnnouncement] = useState('');
 
   useEffect(() => {
-    document.title = 'Pass-and-play chess · TweetChess';
+    document.title = 'Pass-and-play chess · Timeline Games';
   }, []);
 
   const turn: Color = game.fen.split(' ')[1] === 'b' ? 'b' : 'w';
@@ -87,11 +86,7 @@ export function LocalGamePage() {
 
   return (
     <div className="page">
-      <AppHeader>
-        <Link to="/" className="btn btn-secondary btn-small">
-          Play online
-        </Link>
-      </AppHeader>
+      <AppHeader />
       <main className="game-layout">
         <section className={`status-card tone-${endInfo ? 'success' : game.inCheck ? 'danger' : 'info'}`}>
           <div>

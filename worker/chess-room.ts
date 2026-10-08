@@ -270,7 +270,7 @@ export class ChessRoom extends DurableObject<Env> {
       return;
     }
     if (msg.protocol !== PROTOCOL_VERSION) {
-      send(ws, { type: 'error', code: 'unsupported_version', message: 'TweetChess was updated. Please reload the page.' });
+      send(ws, { type: 'error', code: 'unsupported_version', message: 'Timeline Games was updated. Please reload the page.' });
       ws.close(CloseCode.UnsupportedVersion, 'Reload required');
       return;
     }

@@ -31,10 +31,10 @@ export async function dragMove(page: Page, from: string, to: string) {
   await page.mouse.up();
 }
 
-/** Create a private game from the homepage and return its URL. */
+/** Create a private friend game from the chess page and return its URL. */
 export async function createGame(page: Page): Promise<string> {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Create a game' }).click();
+  await page.goto('/chess');
+  await page.getByRole('button', { name: 'Create invite link' }).click();
   await page.waitForURL(/\/game\/[A-Za-z0-9]{10}$/);
   await expect(statusTitle(page)).toHaveText('Waiting for an opponent');
   return page.url();

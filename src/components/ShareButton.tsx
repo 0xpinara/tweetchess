@@ -55,7 +55,7 @@ export function ShareButton({ roomId, variant = 'primary' }: { roomId: string; v
             {copied ? 'Copied ✓' : 'Copy link'}
           </button>
           {canNativeShare() && (
-            <button type="button" className="btn btn-secondary" onClick={() => nativeShare('TweetChess', text, url)}>
+            <button type="button" className="btn btn-secondary" onClick={() => nativeShare('Timeline Games', text, url)}>
               More options…
             </button>
           )}

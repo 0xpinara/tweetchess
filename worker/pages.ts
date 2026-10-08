@@ -11,9 +11,20 @@ interface PageMeta {
 }
 
 const DEFAULT_META: PageMeta = {
-  title: 'TweetChess — live chess you can share in a post',
+  title: 'Timeline Games — chess & poker with your timeline',
   description:
-    'Start a game, share one link, and play in real time. The first friend to click plays you; everyone else can watch live. Free, no sign-up.',
+    "Real-time chess and Texas Hold'em in your browser. Find an opponent, invite a friend with a link, or watch games live. Free, no sign-up, play money only.",
+};
+
+const CHESS_META: PageMeta = {
+  title: 'Play chess live · Timeline Games',
+  description: 'Find an opponent in seconds, invite a friend with a link, or watch public chess games move by move. Free, no sign-up.',
+};
+
+const POKER_META: PageMeta = {
+  title: "Texas Hold'em with friends · Timeline Games",
+  description:
+    "Free play-money Texas Hold'em for 2–6 players. Join a table, invite friends with a link, or watch live. No real money, no sign-up.",
 };
 
 /** Returns preview metadata for app routes, or null for anything else. */
@@ -21,22 +32,37 @@ export function pageMeta(pathname: string): PageMeta | null {
   if (pathname === '/') return DEFAULT_META;
   if (/^\/game\/[A-Za-z0-9]{10}$/.test(pathname)) {
     return {
-      title: 'Play me at chess on TweetChess ♟️',
+      title: 'Play me at chess ♟️ · Timeline Games',
       description:
         'Tap to take the open seat and play live in your browser — or just watch the game in real time. No sign-up, no download.',
     };
   }
+  if (/^\/poker\/table\/[A-Za-z0-9]{10}$/.test(pathname)) {
+    return {
+      title: 'Join my poker table 🃏 · Timeline Games',
+      description:
+        "Free play-money Texas Hold'em in your browser. Take a seat and play live, or watch the table. No real money, no sign-up.",
+    };
+  }
   if (pathname === '/world') {
     return {
-      title: 'The TweetChess World Board ♟️',
+      title: 'The World Board ♟️ · Timeline Games',
       description:
         'One public chessboard for everyone. Grab a seat when it opens and play live while the whole internet watches.',
     };
   }
   if (pathname === '/local') {
     return {
-      title: 'Pass-and-play chess · TweetChess',
+      title: 'Pass-and-play chess · Timeline Games',
       description: 'Play chess with a friend on one device. Legal moves, check, checkmate and draws handled for you.',
+    };
+  }
+  if (pathname === '/chess' || pathname === '/chess/matchmaking') return CHESS_META;
+  if (pathname === '/poker') return POKER_META;
+  if (pathname === '/live' || pathname === '/chess/live' || pathname === '/poker/live') {
+    return {
+      title: 'Watch live chess & poker · Timeline Games',
+      description: 'Browse public chess games and poker tables happening right now and watch them live.',
     };
   }
   return null;

@@ -13,7 +13,7 @@ export function NotFoundPage({
   children?: ReactNode;
 }) {
   useEffect(() => {
-    document.title = `${title} · TweetChess`;
+    document.title = `${title} · Timeline Games`;
   }, [title]);
 
   return (

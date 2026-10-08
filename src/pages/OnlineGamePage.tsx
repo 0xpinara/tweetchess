@@ -154,7 +154,7 @@ export function OnlineGamePage({ roomId }: { roomId: string }) {
   }
 
   const header = (
-    <AppHeader>
+    <AppHeader nav={false}>
       <ConnectionBadge status={status} retryAt={retryAt} onRetry={retryNow} />
       <ShareButton roomId={roomId} />
     </AppHeader>

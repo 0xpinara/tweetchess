@@ -1,5 +1,5 @@
 /**
- * TweetChess Worker entry point.
+ * Timeline Games (TweetChess) Worker entry point.
  *
  *   GET  /health                     → JSON health check
  *   POST /api/rooms                  → create a friend chess game ({ listed?: boolean })
@@ -79,7 +79,7 @@ async function createRoom(request: Request, env: Env, url: URL): Promise<Respons
   } catch (error) {
     console.error('createRoom failed', error);
     return json(
-      { error: 'unavailable', message: 'TweetChess could not create a game right now. Please try again shortly.' },
+      { error: 'unavailable', message: 'Timeline Games could not create a game right now. Please try again shortly.' },
       503,
     );
   }
@@ -99,7 +99,7 @@ async function connect(request: Request, env: Env, url: URL, roomId: string): Pr
     return rejectSocket(
       CloseCode.Unavailable,
       'unavailable',
-      'TweetChess is temporarily unavailable (it may have reached its free daily limit). Please try again later.',
+      'Timeline Games is temporarily unavailable (it may have reached its free daily limit). Please try again later.',
     );
   }
 }

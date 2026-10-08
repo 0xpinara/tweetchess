@@ -11,7 +11,7 @@ export async function createRoom(options: { listed?: boolean } = {}): Promise<st
       body: JSON.stringify({ listed: Boolean(options.listed) }),
     });
   } catch {
-    throw new Error('Could not reach TweetChess. Check your connection and try again.');
+    throw new Error('Could not reach Timeline Games. Check your connection and try again.');
   }
   const body = (await response.json().catch(() => null)) as { roomId?: string; message?: string } | null;
   if (!response.ok || !body?.roomId) {

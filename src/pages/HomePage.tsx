@@ -1,85 +1,136 @@
-import { useEffect, useState } from 'react';
-import { Chessboard } from 'react-chessboard';
+import { useEffect } from 'react';
 import { AppHeader } from '../components/AppHeader.tsx';
-import { createRoom } from '../lib/api.ts';
+import { FriendGameButton } from '../components/FriendGameButton.tsx';
 import { Link } from '../components/Link.tsx';
-import { navigate } from '../lib/router.ts';
+import { LiveGameCard } from '../components/LiveGameCard.tsx';
+import { MiniBoard } from '../components/MiniBoard.tsx';
+import { NameEditor } from '../components/NameEditor.tsx';
+import { PlayingCard } from '../components/PlayingCard.tsx';
+import { PokerFinderButton, PrivateTableButton } from '../components/PokerButtons.tsx';
+import { useActiveGames } from '../lib/active-games.ts';
+import { useLiveGames } from '../lib/live-api.ts';
 
 // Position after 1.e4 e5 2.Nf3 Nc6 3.Bc4 Bc5 (Italian Game) — purely decorative.
 const HERO_FEN = 'r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4';
 
 export function HomePage() {
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const activeGames = useActiveGames();
+  const live = useLiveGames('all', 'all');
 
   useEffect(() => {
-    document.title = 'TweetChess — live chess you can share in a post';
+    document.title = 'Timeline Games — chess & poker with your timeline';
   }, []);
-
-  const startGame = async () => {
-    setCreating(true);
-    setError(null);
-    try {
-      const roomId = await createRoom();
-      navigate(`/game/${roomId}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
-      setCreating(false);
-    }
-  };
 
   return (
     <div className="page">
       <AppHeader />
       <main className="home">
-        <section className="hero">
-          <div className="hero-copy">
-            <p className="eyebrow">Free · No sign-up · Real-time</p>
-            <h1>
-              Chess you can share <span className="accent-text">in a post.</span>
-            </h1>
-            <p className="lede">
-              Start a game, post the link on X, and play whoever clicks first. Everyone else who opens the link
-              watches the game live.
-            </p>
-            <div className="cta-row">
-              <button type="button" className="btn btn-primary btn-large" onClick={startGame} disabled={creating}>
-                {creating ? 'Creating game…' : 'Create a game'}
-              </button>
-              <Link to="/world" className="btn btn-secondary btn-large">
-                Join the World Board
-              </Link>
+        <section className="home-hero">
+          <p className="eyebrow">Free · No sign-up · Real-time</p>
+          <h1>
+            Play real-time games with <span className="accent-text">people across your timeline.</span>
+          </h1>
+          <p className="lede">
+            Chess and Texas Hold&apos;em in your browser. Find an opponent in seconds, send a friend a link, or watch
+            games live. Share any game in a post on X.
+          </p>
+          <NameEditor />
+        </section>
+
+        {activeGames.length > 0 && (
+          <section className="continue" aria-labelledby="continue-title">
+            <h2 id="continue-title" className="section-title">
+              Continue your game
+            </h2>
+            <div className="continue-list">
+              {activeGames.slice(0, 3).map((game) => (
+                <Link
+                  key={`${game.game}:${game.id}`}
+                  to={game.game === 'chess' ? (game.id === 'world' ? '/world' : `/game/${game.id}`) : `/poker/table/${game.id}`}
+                  className="continue-item"
+                >
+                  <span className={`game-tag game-tag-${game.game}`}>{game.game === 'chess' ? 'Chess' : 'Poker'}</span>
+                  <span>{game.label}</span>
+                  <span aria-hidden="true">→</span>
+                </Link>
+              ))}
             </div>
-            {error && (
-              <p className="form-error" role="alert">
-                {error}
+          </section>
+        )}
+
+        <section className="game-choices" aria-label="Choose a game">
+          <article className="game-choice chess-choice">
+            <div className="game-choice-art" aria-hidden="true">
+              <MiniBoard fen={HERO_FEN} />
+            </div>
+            <div className="game-choice-body">
+              <h2>Chess</h2>
+              <p>1v1 games with live spectators. Moves are checked on the server.</p>
+              <div className="choice-actions">
+                <Link to="/chess/matchmaking" className="btn btn-primary">
+                  Find a match
+                </Link>
+                <FriendGameButton />
+                <Link to="/chess/live" className="btn btn-ghost">
+                  Watch live
+                </Link>
+              </div>
+              <p className="choice-more">
+                <Link to="/world" className="text-link">
+                  World Board
+                </Link>{' '}
+                ·{' '}
+                <Link to="/local" className="text-link">
+                  Pass-and-play
+                </Link>
               </p>
-            )}
-            <Link to="/local" className="text-link">
-              Or play pass-and-play on this device →
+            </div>
+          </article>
+
+          <article className="game-choice poker-choice">
+            <div className="game-choice-art" aria-hidden="true">
+              <div className="hero-cards">
+                <PlayingCard card="As" size="large" />
+                <PlayingCard card="Kh" size="large" />
+              </div>
+            </div>
+            <div className="game-choice-body">
+              <h2>Poker</h2>
+              <p>Texas Hold&apos;em for 2–6 players with free play-money chips.</p>
+              <div className="choice-actions">
+                <PokerFinderButton />
+                <PrivateTableButton variant="secondary" />
+                <Link to="/poker/live" className="btn btn-ghost">
+                  Watch live
+                </Link>
+              </div>
+              <p className="choice-more">Play money only: chips are free and have no value.</p>
+            </div>
+          </article>
+        </section>
+
+        <section className="live-now" aria-labelledby="live-now-title">
+          <div className="section-head">
+            <h2 id="live-now-title" className="section-title">
+              Live now
+            </h2>
+            <Link to="/live" className="text-link">
+              See all →
             </Link>
           </div>
-          <div className="hero-board" aria-hidden="true">
-            <div className="hero-board-inner">
-              <Chessboard
-                options={{
-                  id: 'hero',
-                  position: HERO_FEN,
-                  allowDragging: false,
-                  allowDrawingArrows: false,
-                  showNotation: false,
-                  showAnimations: false,
-                  lightSquareStyle: { backgroundColor: 'var(--board-light)' },
-                  darkSquareStyle: { backgroundColor: 'var(--board-dark)' },
-                  squareStyles: {
-                    f1: { backgroundColor: 'rgba(255, 200, 40, 0.38)' },
-                    c4: { backgroundColor: 'rgba(255, 200, 40, 0.38)' },
-                  },
-                  arrows: [{ startSquare: 'f3', endSquare: 'g5', color: 'rgba(29, 155, 240, 0.9)' }],
-                }}
-              />
+          {live.games.length === 0 ? (
+            <p className="hint">
+              {live.status === 'loading'
+                ? 'Loading live games…'
+                : 'No public games right now. Find a match and yours will show up here.'}
+            </p>
+          ) : (
+            <div className="live-grid">
+              {live.games.slice(0, 6).map((game) => (
+                <LiveGameCard key={`${game.game}:${game.id}`} game={game} />
+              ))}
             </div>
-          </div>
+          )}
         </section>
 
         <section className="steps" aria-labelledby="how-it-works">
@@ -89,26 +140,27 @@ export function HomePage() {
           <ol className="step-list">
             <li className="step">
               <span className="step-number">1</span>
-              <h3>Create a game</h3>
-              <p>You get your own board and play White. No account, no download.</p>
+              <h3>Pick a game</h3>
+              <p>Chess or poker. No account, no download. Choose any display name.</p>
             </li>
             <li className="step">
               <span className="step-number">2</span>
-              <h3>Share the link on X</h3>
-              <p>Post it with one tap. The link shows a board preview card in the timeline.</p>
+              <h3>Find people</h3>
+              <p>Get matched with someone online, or share a link on X and play whoever clicks.</p>
             </li>
             <li className="step">
               <span className="step-number">3</span>
-              <h3>Play live</h3>
-              <p>The first person to click plays Black. Everyone after them spectates in real time.</p>
+              <h3>Play or watch live</h3>
+              <p>Everything updates in real time. Public games can be watched by anyone.</p>
             </li>
           </ol>
         </section>
 
         <footer className="site-footer">
           <p>
-            Runs on Cloudflare&apos;s free tier. Moves are checked on the server with chess.js. Piece artwork by
-            Colin M.L. Burnett via react-chessboard.
+            Runs on Cloudflare&apos;s free tier. Chess moves and poker hands are checked on the server. Poker is free
+            play-money entertainment: no real-money betting, purchases, prizes or cash-out. Chess piece artwork by Colin
+            M.L. Burnett via react-chessboard.
           </p>
         </footer>
       </main>

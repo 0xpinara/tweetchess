@@ -38,12 +38,14 @@ describe('link-preview metadata', () => {
     expect(html).toContain('<meta name="twitter:image" content="https://tweetchess.example.workers.dev/og-image.png"');
     expect(html).toContain('<meta property="og:url" content="https://tweetchess.example.workers.dev/game/AbCdEfGh12"');
     expect(html).toContain('<link rel="canonical" href="https://tweetchess.example.workers.dev/game/AbCdEfGh12"');
-    expect(html).toContain('<title>Play me at chess on TweetChess');
+    expect(html).toContain('<title>Play me at chess ♟️ · Timeline Games');
   });
 
   it('uses page-specific titles', async () => {
-    expect((await render('/world')).html).toContain('<title>The TweetChess World Board');
-    expect((await render('/')).html).toContain('<title>TweetChess — live chess');
+    expect((await render('/world')).html).toContain('<title>The World Board ♟️ · Timeline Games');
+    expect((await render('/')).html).toContain('<title>Timeline Games — chess &amp; poker');
+    expect((await render('/poker/table/AbCdEfGh12')).html).toContain('<title>Join my poker table');
+    expect((await render('/live')).html).toContain('<title>Watch live chess &amp; poker');
   });
 
   it('only rewrites known app routes', () => {

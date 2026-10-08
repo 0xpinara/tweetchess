@@ -41,7 +41,7 @@ export function MatchmakingPage() {
 
   return (
     <div className="page">
-      <AppHeader>
+      <AppHeader nav={false}>
         <ConnectionBadge status={status} retryAt={null} onRetry={retryNow} />
       </AppHeader>
       <main className="center-page">
