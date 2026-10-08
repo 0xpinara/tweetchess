@@ -1,0 +1,44 @@
+/**
+ * Wrangler configuration for TweetChess.
+ * Docs: https://developers.cloudflare.com/workers/wrangler/configuration/
+ *
+ * Everything here works on the Cloudflare Workers FREE plan:
+ *  - static assets (the React app) are served for free,
+ *  - one SQLite-backed Durable Object per chess room (free-plan compatible),
+ *  - a free *.workers.dev URL.
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "tweetchess",
+	"main": "worker/index.ts",
+	"compatibility_date": "2026-10-06",
+	"workers_dev": true,
+	"preview_urls": false,
+	"assets": {
+		// Lets the Worker read index.html to add link-preview tags.
+		"binding": "ASSETS",
+		// Unknown paths fall back to index.html so /game/<id> works on refresh.
+		"not_found_handling": "single-page-application",
+		// Only these paths run the Worker; JS/CSS/images skip it entirely,
+		// which keeps them free and outside the daily request quota.
+		"run_worker_first": ["/", "/game/*", "/world", "/local", "/api/*", "/health"]
+	},
+	"durable_objects": {
+		"bindings": [{ "name": "CHESS_ROOM", "class_name": "ChessRoom" }]
+	},
+	// Declares the Durable Object class (current "exports" format, which
+	// replaces the legacy "migrations" array). SQLite storage is what the
+	// free plan supports.
+	"exports": {
+		"ChessRoom": { "type": "durable-object", "storage": "sqlite" }
+	},
+	"vars": {
+		// Extra origins allowed to open WebSockets / create rooms, comma separated.
+		// Same-origin requests are always allowed.
+		"ALLOWED_ORIGINS": ""
+	},
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true
+}

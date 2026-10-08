@@ -1,0 +1,41 @@
+{
+  "name": "tweetchess",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "npm run build && vite preview",
+    "deploy": "npm run build && wrangler deploy",
+    "test": "npm run test:unit && npm run test:worker",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:worker": "vitest run --config vitest.worker.config.ts",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc -b && tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.test-client.json --noEmit",
+    "lint": "oxlint",
+    "generate:assets": "node scripts/generate-assets.mjs",
+    "cf-typegen": "wrangler types --strict-vars=false"
+  },
+  "dependencies": {
+    "chess.js": "^1.4.0",
+    "react": "^19.2.8",
+    "react-chessboard": "^5.12.1",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.63.0",
+    "@cloudflare/vitest-plugin": "^1.4.0",
+    "@playwright/test": "^1.64.0",
+    "@types/node": "^24.19.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "oxlint": "^1.81.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.149.0"
+  },
+  "description": "TweetChess — free, real-time multiplayer chess you can share on X. React + Cloudflare Workers + Durable Objects."
+}

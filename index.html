@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0d12" />
+    <title>TweetChess — live chess you can share in a post</title>
+    <meta
+      name="description"
+      content="Start a game, share one link, and play in real time. The first friend to click plays you; everyone else can watch live. Free, no sign-up."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!--
+      Link-preview metadata. These values are the defaults; the Worker
+      (worker/pages.ts) rewrites title/description per page, turns image URLs
+      into absolute ones (X requires them) and adds og:url + canonical.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="TweetChess" />
+    <meta property="og:title" content="TweetChess — live chess you can share in a post" />
+    <meta
+      property="og:description"
+      content="Start a game, share one link, and play in real time. The first friend to click plays you; everyone else can watch live. Free, no sign-up."
+    />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="600" />
+    <meta property="og:image:alt" content="TweetChess: a chessboard with the words 'Live chess you can share in a post'" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="TweetChess — live chess you can share in a post" />
+    <meta
+      name="twitter:description"
+      content="Start a game, share one link, and play in real time. The first friend to click plays you; everyone else can watch live. Free, no sign-up."
+    />
+    <meta name="twitter:image" content="/og-image.png" />
+    <meta name="twitter:image:alt" content="TweetChess: a chessboard with the words 'Live chess you can share in a post'" />
+  </head>
+  <body>
+    <noscript>TweetChess needs JavaScript to run the chessboard.</noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
