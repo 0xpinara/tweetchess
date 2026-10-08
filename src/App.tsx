@@ -8,6 +8,7 @@ import { MatchmakingPage } from './pages/MatchmakingPage.tsx';
 import { NotFoundPage } from './pages/NotFoundPage.tsx';
 import { OnlineGamePage } from './pages/OnlineGamePage.tsx';
 import { PokerHomePage } from './pages/PokerHomePage.tsx';
+import { PokerTablePage } from './pages/PokerTablePage.tsx';
 
 export default function App() {
   const pathname = usePathname();
@@ -24,6 +25,9 @@ export default function App() {
 
   const game = pathname.match(/^\/game\/([A-Za-z0-9]{10})\/?$/);
   if (game) return <OnlineGamePage key={game[1]} roomId={game[1]} />;
+
+  const pokerTable = pathname.match(/^\/poker\/table\/([A-Za-z0-9]{10})\/?$/);
+  if (pokerTable) return <PokerTablePage key={pokerTable[1]} tableId={pokerTable[1]} />;
 
   return <NotFoundPage />;
 }

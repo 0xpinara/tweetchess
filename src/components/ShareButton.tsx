@@ -1,13 +1,24 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { canNativeShare, copyText, nativeShare, roomUrl, shareText, xIntentUrl } from '../lib/share.ts';
 
-export function ShareButton({ roomId, variant = 'primary' }: { roomId: string; variant?: 'primary' | 'secondary' }) {
+/** Share a chess room (by `roomId`) or any link with its own text (`url` + `text`). */
+export function ShareButton({
+  roomId,
+  url: customUrl,
+  text: customText,
+  variant = 'primary',
+}: {
+  roomId?: string;
+  url?: string;
+  text?: string;
+  variant?: 'primary' | 'secondary';
+}) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const panelId = useId();
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const url = roomUrl(roomId);
-  const text = shareText(roomId);
+  const url = customUrl ?? roomUrl(roomId ?? '');
+  const text = customText ?? shareText(roomId ?? '');
 
   useEffect(() => {
     if (!open) return;

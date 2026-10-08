@@ -84,7 +84,7 @@ test('narrow embedded-browser widths never scroll sideways', async ({ browser })
   for (const width of [320, 360, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 640 }, hasTouch: true, isMobile: true });
     const page = await context.newPage();
-    for (const route of ['/', '/local', '/chess', '/live', '/chess/matchmaking']) {
+    for (const route of ['/', '/local', '/chess', '/live', '/chess/matchmaking', '/poker', '/poker/live']) {
       await page.goto(route);
       await page.waitForLoadState('networkidle');
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
