@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test-client.tsbuildinfo"
+  },
+  "include": ["test/unit/client.test.ts", "src", "shared"]
+}
