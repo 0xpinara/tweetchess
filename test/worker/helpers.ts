@@ -23,6 +23,8 @@ export type StateMessage = { type: 'state'; you: Role; state: RoomSnapshot };
 /** A WebSocket test client with a message inbox and awaitable expectations. */
 export class TestClient {
   readonly inbox: ServerMessage[] = [];
+  /** Every text frame received, verbatim (for hidden-information checks). */
+  readonly frames: string[] = [];
   closed: { code: number; reason: string } | null = null;
   private waiters: { match: (m: ServerMessage) => boolean; resolve: (m: ServerMessage) => void }[] = [];
   private closeWaiters: ((info: { code: number; reason: string }) => void)[] = [];
@@ -33,6 +35,7 @@ export class TestClient {
     this.ws = ws;
     ws.addEventListener('message', (event) => {
       if (typeof event.data !== 'string' || event.data === 'pong') return;
+      this.frames.push(event.data);
       const message = JSON.parse(event.data) as ServerMessage;
       const waiter = this.waiters.find((w) => w.match(message));
       if (waiter) {

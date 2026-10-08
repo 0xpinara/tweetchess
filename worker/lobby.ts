@@ -1,6 +1,10 @@
 /**
  * GameLobby — one Durable Object per game type ("chess", "poker").
  *
+ * Poker instance: finds a public table with an open seat for "Find a table"
+ * (reserving seats briefly so a burst of players doesn't pile onto one seat),
+ * or opens a new public table.
+ *
  * Both instances keep the public live-games directory for their game: rooms
  * that are listed push small summaries here (throttled), visitors read them
  * in pages. Entries carry no player identities, and stale ones expire, so a
@@ -46,6 +50,11 @@ export const LISTING_STALE_MS = 30 * 60 * 1000;
 const LISTING_PURGE_MS = 10 * 60 * 1000;
 /** Upper bound on directory size per game type (oldest entries are dropped). */
 const MAX_LISTINGS = 1000;
+/** Seats handed out by the table finder count as taken for this long. */
+const SEAT_RESERVATION_MS = 20_000;
+/** A table the finder just opened is offered to the next players for this long, even before it is listed. */
+const FRESH_TABLE_MS = 60_000;
+const POKER_MAX_SEATS = 6;
 /** After a failed room creation, try pairing again this soon. */
 const PAIRING_RETRY_MS = 5_000;
 const RATE_BURST = 10;
@@ -74,6 +83,10 @@ export class GameLobby extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private readonly buckets = new WeakMap<WebSocket, { tokens: number; at: number }>();
   private alarmAt: number | null = null;
+  /** Poker finder (in memory; losing it on hibernation only loses a few seconds of hints). */
+  private readonly reservations = new Map<string, number[]>();
+  private readonly freshTables = new Map<string, number>();
+  private creatingTable: Promise<string> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -146,6 +159,64 @@ export class GameLobby extends DurableObject<Env> {
       .toArray();
     const games = rows.slice(0, limit).map((row) => JSON.parse(row.data as string) as LiveGame);
     return { games, nextCursor: rows.length > limit ? String(offset + limit) : null };
+  }
+
+  // ------------------------------------------------- Poker table finder (RPC)
+
+  /** A public poker table with a free seat, or a brand-new one. */
+  async findPokerTable(): Promise<{ tableId: string }> {
+    const now = Date.now();
+    for (const [id, times] of this.reservations) {
+      const live = times.filter((at) => now - at < SEAT_RESERVATION_MS);
+      if (live.length > 0) this.reservations.set(id, live);
+      else this.reservations.delete(id);
+    }
+    for (const [id, createdAt] of this.freshTables) if (now - createdAt > FRESH_TABLE_MS) this.freshTables.delete(id);
+    const reserved = (id: string) => this.reservations.get(id)?.length ?? 0;
+
+    // Tables waiting for players first (gets games going), then new tables, then games in progress.
+    const rows = this.sql
+      .exec(
+        `SELECT id, open_seats, status FROM listings WHERE open_seats > 0 AND updated_at > ?
+         ORDER BY CASE status WHEN 'waiting' THEN 0 ELSE 1 END, open_seats ASC, updated_at DESC LIMIT 25`,
+        now - LISTING_STALE_MS,
+      )
+      .toArray()
+      .map((row) => ({ id: row.id as string, open: row.open_seats as number, waiting: row.status === 'waiting' }));
+    const listed = new Set(rows.map((row) => row.id));
+    const fresh = [...this.freshTables.keys()]
+      .filter((id) => !listed.has(id))
+      .map((id) => ({ id, open: POKER_MAX_SEATS, waiting: true }));
+    const candidates = [...rows.filter((row) => row.waiting), ...fresh, ...rows.filter((row) => !row.waiting)];
+
+    for (const candidate of candidates) {
+      if (candidate.open - reserved(candidate.id) > 0) {
+        this.reserve(candidate.id, now);
+        return { tableId: candidate.id };
+      }
+    }
+    // Nothing free: open one new public table (concurrent requests share it).
+    if (!this.creatingTable) {
+      this.creatingTable = this.createPublicTable().finally(() => {
+        this.creatingTable = null;
+      });
+    }
+    const tableId = await this.creatingTable;
+    this.freshTables.set(tableId, Date.now());
+    this.reserve(tableId, Date.now());
+    return { tableId };
+  }
+
+  private reserve(tableId: string, now: number): void {
+    this.reservations.set(tableId, [...(this.reservations.get(tableId) ?? []), now]);
+  }
+
+  private async createPublicTable(): Promise<string> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const tableId = randomRoomId();
+      if (await this.env.POKER_TABLE.getByName(tableId).initialize(tableId, 'public')) return tableId;
+    }
+    throw new Error('Could not create a poker table');
   }
 
   // ------------------------------------------------------ Matchmaking (WebSocket)

@@ -40,7 +40,9 @@
 			// One object per chess game.
 			{ "name": "CHESS_ROOM", "class_name": "ChessRoom" },
 			// One object per game type ("chess", "poker"): matchmaking + live directory.
-			{ "name": "LOBBY", "class_name": "GameLobby" }
+			{ "name": "LOBBY", "class_name": "GameLobby" },
+			// One object per poker table.
+			{ "name": "POKER_TABLE", "class_name": "PokerTable" }
 		]
 	},
 	// Declares the Durable Object class (current "exports" format, which
@@ -48,7 +50,8 @@
 	// free plan supports.
 	"exports": {
 		"ChessRoom": { "type": "durable-object", "storage": "sqlite" },
-		"GameLobby": { "type": "durable-object", "storage": "sqlite" }
+		"GameLobby": { "type": "durable-object", "storage": "sqlite" },
+		"PokerTable": { "type": "durable-object", "storage": "sqlite" }
 	},
 	"vars": {
 		// Extra origins allowed to open WebSockets / create rooms, comma separated.

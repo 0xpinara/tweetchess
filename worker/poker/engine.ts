@@ -56,6 +56,8 @@ export interface SeatState {
   missedTurns: number;
   /** Asked to leave during a hand: the seat is freed when the hand ends. */
   leaving: boolean;
+  /** When the player's last connection closed (null while connected). */
+  disconnectedAt: number | null;
 }
 
 export interface HandPlayer {
@@ -187,6 +189,7 @@ export function sit(state: TableState, hash: string, name: string, now: number, 
     sittingOut: false,
     missedTurns: 0,
     leaving: false,
+    disconnectedAt: null,
   };
   state.updatedAt = now;
   return ok;
@@ -226,6 +229,31 @@ export function leave(state: TableState, hash: string, now: number): EngineResul
   }
   state.updatedAt = now;
   return ok;
+}
+
+/**
+ * Free the seats of players who have been disconnected for at least `graceMs`
+ * (players still holding cards in a live hand are freed when it ends). Keeps
+ * absent players from blocking a table forever. Returns true if any changed.
+ */
+export function releaseAbsentSeats(state: TableState, now: number, graceMs: number): boolean {
+  let changed = false;
+  state.seats.forEach((seat, index) => {
+    if (!seat || seat.disconnectedAt === null || now - seat.disconnectedAt < graceMs) return;
+    const player = state.hand && !state.hand.done ? state.hand.players[index] : undefined;
+    if (player) {
+      // Still in a live hand: free the seat when the hand ends (they time out meanwhile).
+      if (!seat.leaving) {
+        seat.leaving = true;
+        changed = true;
+      }
+      return;
+    }
+    state.seats[index] = null;
+    changed = true;
+  });
+  if (changed) state.updatedAt = now;
+  return changed;
 }
 
 /** Sit out of the next hands (away = true) or come back. */

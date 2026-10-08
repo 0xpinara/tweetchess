@@ -6,6 +6,9 @@
  *   GET  /api/rooms/:id/ws           → WebSocket into the chess room's Durable Object
  *   GET  /api/matchmaking/chess/ws   → WebSocket into the chess matchmaking lobby
  *   GET  /api/live                   → public live-games directory (paginated)
+ *   POST /api/poker/tables           → create a private poker table
+ *   POST /api/poker/find             → a public poker table with a free seat (or a new one)
+ *   GET  /api/poker/tables/:id/ws    → WebSocket into the poker table's Durable Object
  *   GET  /, /game/:id, /world…       → the React app, with link-preview tags
  *
  * Static files (JS, CSS, images) are served by Cloudflare's asset handler
@@ -17,8 +20,9 @@ import { ChessRoom, rejectSocket } from './chess-room.ts';
 import { randomRoomId } from './crypto.ts';
 import { GameLobby } from './lobby.ts';
 import { renderPage } from './pages.ts';
+import { PokerTable } from './poker-table.ts';
 
-export { ChessRoom, GameLobby };
+export { ChessRoom, GameLobby, PokerTable };
 
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
@@ -43,6 +47,14 @@ export default {
     if (socketRoute) return connect(request, env, url, socketRoute[1]);
 
     if (pathname === '/api/matchmaking/chess/ws') return connectLobby(request, env, url, 'chess');
+
+    if (pathname === '/api/poker/tables' || pathname === '/api/poker/find') {
+      if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405, { Allow: 'POST' });
+      return pathname === '/api/poker/find' ? findPokerTable(request, env, url) : createPokerTable(request, env, url);
+    }
+
+    const pokerSocket = pathname.match(/^\/api\/poker\/tables\/([^/]+)\/ws$/);
+    if (pokerSocket) return connectPoker(request, env, url, pokerSocket[1]);
 
     if (pathname === '/api/live') {
       if (request.method !== 'GET') return json({ error: 'method_not_allowed' }, 405, { Allow: 'GET' });
@@ -100,6 +112,59 @@ async function connect(request: Request, env: Env, url: URL, roomId: string): Pr
       CloseCode.Unavailable,
       'unavailable',
       'Timeline Games is temporarily unavailable (it may have reached its free daily limit). Please try again later.',
+    );
+  }
+}
+
+async function createPokerTable(request: Request, env: Env, url: URL): Promise<Response> {
+  if (!isSameOrigin(request, url, env)) return json({ error: 'forbidden_origin' }, 403);
+  if (!allowRoomCreation(request)) {
+    return json({ error: 'rate_limited', message: 'You are creating tables very quickly. Please wait a minute.' }, 429, {
+      'Retry-After': '60',
+    });
+  }
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const tableId = randomRoomId();
+      if (await env.POKER_TABLE.getByName(tableId).initialize(tableId, 'private')) {
+        return json({ tableId, path: `/poker/table/${tableId}` }, 201);
+      }
+    }
+    return json({ error: 'try_again' }, 503);
+  } catch (error) {
+    console.error('createPokerTable failed', error);
+    return json({ error: 'unavailable', message: 'Could not open a poker table right now. Please try again shortly.' }, 503);
+  }
+}
+
+async function findPokerTable(request: Request, env: Env, url: URL): Promise<Response> {
+  if (!isSameOrigin(request, url, env)) return json({ error: 'forbidden_origin' }, 403);
+  if (!allowRoomCreation(request)) {
+    return json({ error: 'rate_limited', message: 'Too many requests. Please wait a minute.' }, 429, { 'Retry-After': '60' });
+  }
+  try {
+    const { tableId } = await env.LOBBY.getByName('poker').findPokerTable();
+    return json({ tableId, path: `/poker/table/${tableId}` });
+  } catch (error) {
+    console.error('findPokerTable failed', error);
+    return json({ error: 'unavailable', message: 'Could not find a poker table right now. Please try again shortly.' }, 503);
+  }
+}
+
+async function connectPoker(request: Request, env: Env, url: URL, tableId: string): Promise<Response> {
+  if (request.method !== 'GET' || request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+    return json({ error: 'expected_websocket' }, 426);
+  }
+  if (!isValidRoomId(tableId) || tableId === 'world') return json({ error: 'invalid_table' }, 404);
+  if (!isSameOrigin(request, url, env)) return json({ error: 'forbidden_origin' }, 403);
+  try {
+    return await env.POKER_TABLE.getByName(tableId).fetch(request);
+  } catch (error) {
+    console.error('poker connect failed', error);
+    return rejectSocket(
+      CloseCode.Unavailable,
+      'unavailable',
+      'Poker is temporarily unavailable (it may have reached its free daily limit). Please try again later.',
     );
   }
 }

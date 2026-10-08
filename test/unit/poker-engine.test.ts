@@ -11,6 +11,7 @@ import {
   privateView,
   publicView,
   rebuy,
+  releaseAbsentSeats,
   setAway,
   sit,
   startHand,
@@ -439,5 +440,26 @@ describe('hidden information', () => {
     expect(view.seats[2]!.shownCards).toBeNull();
     expect(JSON.stringify(view)).not.toContain('"7s"');
     expect(view.lastResult!.winners[0]).toMatchObject({ seat: 0, hand: 'Pair of Aces' });
+  });
+});
+
+describe('absent players', () => {
+  it('frees the seats of players disconnected too long, but not mid-hand', () => {
+    const state = table({ 0: 1000, 1: 1000, 2: 1000 });
+    state.seats[2]!.disconnectedAt = NOW - 10 * 60_000;
+    state.seats[1]!.disconnectedAt = NOW - 10_000;
+    expect(releaseAbsentSeats(state, NOW, 5 * 60_000)).toBe(true);
+    expect(state.seats[2]).toBeNull();
+    expect(state.seats[1]).not.toBeNull(); // not long enough yet
+
+    // In a live hand the seat is only marked and freed when the hand ends.
+    const hand = deal(state);
+    state.seats[0]!.disconnectedAt = NOW - 10 * 60_000;
+    releaseAbsentSeats(state, NOW, 5 * 60_000);
+    expect(state.seats[0]).toMatchObject({ leaving: true });
+    expect(hand.players[0].folded).toBe(false);
+    play(state, hand.turn!, 'fold');
+    expect(state.hand!.done).toBe(true);
+    expect(state.seats[0]).toBeNull();
   });
 });
