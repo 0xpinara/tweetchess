@@ -1,0 +1,116 @@
+/**
+ * Serves the single-page app's index.html with link-preview metadata filled
+ * in on the server. X (Twitter) and other crawlers do not run JavaScript, so
+ * card tags must be in the initial HTML — and image URLs must be absolute,
+ * which we can only know at request time (e.g. https://tweetchess.<you>.workers.dev).
+ */
+
+interface PageMeta {
+  title: string;
+  description: string;
+}
+
+const DEFAULT_META: PageMeta = {
+  title: 'TweetChess — live chess you can share in a post',
+  description:
+    'Start a game, share one link, and play in real time. The first friend to click plays you; everyone else can watch live. Free, no sign-up.',
+};
+
+/** Returns preview metadata for app routes, or null for anything else. */
+export function pageMeta(pathname: string): PageMeta | null {
+  if (pathname === '/') return DEFAULT_META;
+  if (/^\/game\/[A-Za-z0-9]{10}$/.test(pathname)) {
+    return {
+      title: 'Play me at chess on TweetChess ♟️',
+      description:
+        'Tap to take the open seat and play live in your browser — or just watch the game in real time. No sign-up, no download.',
+    };
+  }
+  if (pathname === '/world') {
+    return {
+      title: 'The TweetChess World Board ♟️',
+      description:
+        'One public chessboard for everyone. Grab a seat when it opens and play live while the whole internet watches.',
+    };
+  }
+  if (pathname === '/local') {
+    return {
+      title: 'Pass-and-play chess · TweetChess',
+      description: 'Play chess with a friend on one device. Legal moves, check, checkmate and draws handled for you.',
+    };
+  }
+  return null;
+}
+
+export async function renderPage(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const asset = await env.ASSETS.fetch(request);
+  const meta = pageMeta(url.pathname);
+  if (!meta || request.method !== 'GET' || !asset.ok) return asset;
+  if (!(asset.headers.get('Content-Type') ?? '').includes('text/html')) return asset;
+
+  const canonical = `${url.origin}${url.pathname}`;
+  const image = `${url.origin}/og-image.png`;
+  const content = (value: string): HTMLRewriterElementContentHandlers => ({
+    element(element) {
+      element.setAttribute('content', value);
+    },
+  });
+
+  const rewritten = new HTMLRewriter()
+    .on('title', {
+      element(element) {
+        element.setInnerContent(meta.title);
+      },
+    })
+    .on('head', {
+      element(element) {
+        const url = escapeAttribute(canonical);
+        element.append(`<link rel="canonical" href="${url}" />\n<meta property="og:url" content="${url}" />\n`, {
+          html: true,
+        });
+      },
+    })
+    .on('meta[name="description"]', content(meta.description))
+    .on('meta[property="og:title"]', content(meta.title))
+    .on('meta[property="og:description"]', content(meta.description))
+    .on('meta[property="og:image"]', content(image))
+    .on('meta[name="twitter:title"]', content(meta.title))
+    .on('meta[name="twitter:description"]', content(meta.description))
+    .on('meta[name="twitter:image"]', content(image))
+    .transform(asset);
+
+  const headers = new Headers(rewritten.headers);
+  // The body changed, so the asset's validators no longer apply.
+  headers.delete('ETag');
+  headers.delete('Content-Length');
+  headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (!import.meta.env.DEV) headers.set('Content-Security-Policy', contentSecurityPolicy(url));
+  return new Response(rewritten.body, { status: rewritten.status, headers });
+}
+
+/**
+ * Production-only CSP (Vite's dev server injects inline scripts). Inline
+ * *styles* are needed by the chessboard component. The WebSocket origin is
+ * listed explicitly because older browsers don't treat 'self' as covering wss:.
+ */
+function contentSecurityPolicy(url: URL): string {
+  const socketOrigin = `${url.protocol === 'https:' ? 'wss' : 'ws'}://${url.host}`;
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    `connect-src 'self' ${socketOrigin}`,
+    "font-src 'self'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'self'",
+  ].join('; ');
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
