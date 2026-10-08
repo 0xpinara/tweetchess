@@ -1,19 +1,22 @@
 /**
  * TweetChess Worker entry point.
  *
- *   GET  /health                → JSON health check
- *   POST /api/rooms             → create a private room
- *   GET  /api/rooms/:id/ws      → WebSocket into the room's Durable Object
- *   GET  /, /game/:id, /world…  → the React app, with link-preview tags
+ *   GET  /health                     → JSON health check
+ *   POST /api/rooms                  → create a friend chess game ({ listed?: boolean })
+ *   GET  /api/rooms/:id/ws           → WebSocket into the chess room's Durable Object
+ *   GET  /api/matchmaking/chess/ws   → WebSocket into the chess matchmaking lobby
+ *   GET  /, /game/:id, /world…       → the React app, with link-preview tags
  *
  * Static files (JS, CSS, images) are served by Cloudflare's asset handler
  * without invoking this Worker at all.
  */
-import { CloseCode, ROOM_ID_LENGTH, WORLD_ROOM_ID, isValidRoomId } from '../shared/protocol.ts';
+import { CloseCode, isValidRoomId } from '../shared/protocol.ts';
 import { ChessRoom, rejectSocket } from './chess-room.ts';
+import { randomRoomId } from './crypto.ts';
+import { GameLobby } from './lobby.ts';
 import { renderPage } from './pages.ts';
 
-export { ChessRoom };
+export { ChessRoom, GameLobby };
 
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
@@ -37,6 +40,8 @@ export default {
     const socketRoute = pathname.match(/^\/api\/rooms\/([^/]+)\/ws$/);
     if (socketRoute) return connect(request, env, url, socketRoute[1]);
 
+    if (pathname === '/api/matchmaking/chess/ws') return connectLobby(request, env, url, 'chess');
+
     if (pathname.startsWith('/api/')) return json({ error: 'not_found' }, 404);
 
     return renderPage(request, env);
@@ -52,11 +57,14 @@ async function createRoom(request: Request, env: Env, url: URL): Promise<Respons
       { 'Retry-After': '60' },
     );
   }
+  // Optional JSON body: { "listed": true } shows the game in the public directory.
+  const body = (await request.json().catch(() => null)) as { listed?: unknown } | null;
+  const listed = body?.listed === true;
   try {
     // A collision is astronomically unlikely, but retry rather than reuse a room.
     for (let attempt = 0; attempt < 3; attempt++) {
       const roomId = randomRoomId();
-      if (await env.CHESS_ROOM.getByName(roomId).initialize(roomId)) {
+      if (await env.CHESS_ROOM.getByName(roomId).initialize(roomId, { listed })) {
         return json({ roomId, path: `/game/${roomId}` }, 201);
       }
     }
@@ -85,6 +93,23 @@ async function connect(request: Request, env: Env, url: URL, roomId: string): Pr
       CloseCode.Unavailable,
       'unavailable',
       'TweetChess is temporarily unavailable (it may have reached its free daily limit). Please try again later.',
+    );
+  }
+}
+
+async function connectLobby(request: Request, env: Env, url: URL, lobby: 'chess'): Promise<Response> {
+  if (request.method !== 'GET' || request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+    return json({ error: 'expected_websocket' }, 426);
+  }
+  if (!isSameOrigin(request, url, env)) return json({ error: 'forbidden_origin' }, 403);
+  try {
+    return await env.LOBBY.getByName(lobby).fetch(request);
+  } catch (error) {
+    console.error('lobby connect failed', error);
+    return rejectSocket(
+      CloseCode.Unavailable,
+      'unavailable',
+      'Matchmaking is temporarily unavailable (it may have reached its free daily limit). Please try again later.',
     );
   }
 }
@@ -125,20 +150,6 @@ function allowRoomCreation(request: Request): boolean {
   }
   entry.count += 1;
   return entry.count <= ROOMS_PER_MINUTE;
-}
-
-const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-
-/** Unbiased random base62 ID from the Web Crypto CSPRNG. */
-export function randomRoomId(): string {
-  let id = '';
-  while (id.length < ROOM_ID_LENGTH) {
-    for (const byte of crypto.getRandomValues(new Uint8Array(16))) {
-      // 248 = 4 × 62: discard bytes ≥ 248 to avoid modulo bias.
-      if (byte < 248 && id.length < ROOM_ID_LENGTH) id += ALPHABET[byte % 62];
-    }
-  }
-  return id === WORLD_ROOM_ID ? randomRoomId() : id;
 }
 
 function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {

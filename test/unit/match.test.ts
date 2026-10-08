@@ -364,3 +364,60 @@ describe('World Board rotation', () => {
     expect(match.rematch(BLACK, true, 1, NOW)).toMatchObject({ ok: false, code: 'not_allowed' });
   });
 });
+
+describe('matchmade games', () => {
+  const white = { hash: WHITE, name: 'Alice' };
+  const black = { hash: BLACK, name: 'Bob' };
+
+  it('start immediately with both seats assigned and names set', () => {
+    const match = Match.createMatchGame('AbCdEfGh12', white, black, NOW);
+    expect(match.record).toMatchObject({ kind: 'match', status: 'active', white: WHITE, black: BLACK, listed: true, turnStartedAt: NOW });
+    const snapshot = match.snapshot({ online: { w: true, b: true }, spectators: 0 });
+    expect(snapshot.seats.w.name).toBe('Alice');
+    expect(snapshot.seats.b.name).toBe('Bob');
+  });
+
+  it('never seat anyone else', () => {
+    const match = Match.createMatchGame('AbCdEfGh12', white, black, NOW);
+    match.leave(BLACK, NOW);
+    expect(match.claimSeat(VIEWER, NOW)).toEqual({ role: 'spectator', changed: false });
+  });
+
+  it('abort (no winner) when a player leaves before the first move', () => {
+    const match = Match.createMatchGame('AbCdEfGh12', white, black, NOW);
+    match.leave(WHITE, NOW);
+    expect(match.record).toMatchObject({ status: 'over', end: { winner: null, reason: 'aborted' } });
+  });
+
+  it('end without a winner when both players vanish', () => {
+    const match = Match.createMatchGame('AbCdEfGh12', white, black, NOW);
+    play(match, [['e2', 'e4']]);
+    match.abandonAll(NOW);
+    expect(match.record).toMatchObject({ status: 'over', end: { winner: null, reason: 'aborted' } });
+  });
+
+  it('allow a rematch with colours and names swapped', () => {
+    const match = Match.createMatchGame('AbCdEfGh12', white, black, NOW);
+    match.resign(WHITE, 1, NOW);
+    match.rematch(WHITE, true, 1, NOW);
+    match.rematch(BLACK, true, 1, NOW);
+    expect(match.record).toMatchObject({ game: 2, white: BLACK, black: WHITE, names: { w: 'Bob', b: 'Alice' } });
+  });
+});
+
+describe('friend games', () => {
+  it('are unlisted unless the creator chooses to list them', () => {
+    expect(Match.create('AbCdEfGh12', 'private', NOW).record.listed).toBe(false);
+    expect(Match.create('AbCdEfGh12', 'private', NOW, { listed: true }).record.listed).toBe(true);
+    expect(Match.create('world', 'world', NOW).record.listed).toBe(true);
+  });
+
+  it('keep the display names of seated players', () => {
+    const match = Match.create('AbCdEfGh12', 'private', NOW);
+    match.claimSeat(WHITE, NOW, undefined, 'Alice');
+    expect(match.setName(WHITE, 'Alice')).toBe(false);
+    expect(match.setName(WHITE, 'Alicia')).toBe(true);
+    expect(match.setName(VIEWER, 'Nobody')).toBe(false);
+    expect(match.record.names.w).toBe('Alicia');
+  });
+});

@@ -106,6 +106,8 @@ export function describeEnd(end: GameEnd): { title: string; detail: string } {
       return { title: `${winner} wins`, detail: `${loser} left the game.` };
     case 'timeout':
       return { title: `${winner} wins on time`, detail: `${loser} took too long to move.` };
+    case 'aborted':
+      return { title: 'Game aborted', detail: 'A player left before the game really started, so nobody wins.' };
     case 'stalemate':
       return { title: 'Draw by stalemate', detail: 'The side to move has no legal moves but is not in check.' };
     case 'insufficient_material':

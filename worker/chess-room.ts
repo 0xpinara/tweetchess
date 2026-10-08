@@ -5,9 +5,11 @@
  * - Talks to browsers over WebSockets using the Hibernation API, so an idle
  *   room is evicted from memory (and stops accruing duration) while its
  *   sockets stay connected.
- * - Every rule decision is delegated to the pure `Match` class.
+ * - Every rule decision is delegated to the pure `Match` class; how each kind
+ *   of room behaves (timers, seating, expiry) lives in policies.ts.
  */
 import { DurableObject } from 'cloudflare:workers';
+import { DEFAULT_NAME, sanitizeDisplayName } from '../shared/names.ts';
 import {
   CloseCode,
   MAX_CLIENT_MESSAGE_BYTES,
@@ -19,6 +21,7 @@ import {
   type Color,
   type EndReason,
   type ErrorCode,
+  type MatchStatus,
   type PieceType,
   type PromotionPiece,
   type Role,
@@ -27,7 +30,16 @@ import {
   type RoomTimers,
   type ServerMessage,
 } from '../shared/protocol.ts';
-import { Match, type ActionResult, type MatchRecord, type MoveRecord, type Presence } from './match.ts';
+import { hashToken } from './crypto.ts';
+import {
+  Match,
+  type ActionResult,
+  type MatchRecord,
+  type MoveRecord,
+  type Presence,
+  type SeatAssignment,
+} from './match.ts';
+import { POLICIES, type RoomPolicy } from './policies.ts';
 
 /**
  * Connection limits per room. Seated players are always let in; spectators
@@ -40,13 +52,15 @@ export const LIMITS = {
   helloTimeoutMs: 10_000,
 };
 /** Private rooms are deleted after this long without any activity. */
-export const ROOM_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const ROOM_TTL_MS = POLICIES.private.ttlMs!;
 /** World room: a seated player offline for this long loses their seat. */
-export const WORLD_SEAT_GRACE_MS = 60 * 1000;
+export const WORLD_SEAT_GRACE_MS = POLICIES.world.seatGraceMs!;
 /** World room: time allowed per move before the player to move forfeits. */
-export const WORLD_TURN_LIMIT_MS = 3 * 60 * 1000;
+export const WORLD_TURN_LIMIT_MS = POLICIES.world.turnLimitMs!;
 /** World room: after a game ends, the result stays up this long, then the seats open up. */
-export const WORLD_POSTGAME_MS = 30 * 1000;
+export const WORLD_POSTGAME_MS = POLICIES.world.rotateSeatsAfterMs!;
+/** When nobody is connected, re-check an idle room's expiry at most this often. */
+const EXPIRY_RECHECK_MS = 60 * 60 * 1000;
 /** Per-socket token bucket: burst of 20 messages, refilled at 5 per second. */
 const RATE_BURST = 20;
 const RATE_PER_SECOND = 5;
@@ -60,9 +74,16 @@ interface Attachment {
   hash: string | null;
   /** When the socket connected (to close ones that never say hello). */
   connectedAt: number;
+  /** Display name sent with hello (used if this guest later takes a seat). */
+  name?: string;
 }
 
 type Row = Record<string, SqlStorageValue>;
+
+/** Whether a policy needs alarms while a game is being played. */
+function hasGameTimers(policy: RoomPolicy): boolean {
+  return policy.seatGraceMs !== null || policy.turnLimitMs !== null || policy.rotateSeatsAfterMs !== null;
+}
 
 export class ChessRoom extends DurableObject<Env> {
   private readonly sql: SqlStorage;
@@ -83,12 +104,43 @@ export class ChessRoom extends DurableObject<Env> {
 
   // ---------------------------------------------------------------- RPC
 
-  /** Called by POST /api/rooms. Returns false if the room already exists. */
-  async initialize(roomId: string): Promise<boolean> {
+  /** Called by POST /api/rooms ("Play with a Friend"). Returns false if the room already exists. */
+  async initialize(roomId: string, options: { listed?: boolean } = {}): Promise<boolean> {
     if (!isValidRoomId(roomId) || roomId === WORLD_ROOM_ID) throw new Error('Invalid room id');
     if (this.load()) return false;
-    this.create(roomId, 'private');
+    this.create(roomId, 'private', { listed: Boolean(options.listed) });
     return true;
+  }
+
+  /**
+   * Called by the matchmaking lobby. Creates a game with both seats already
+   * assigned. Idempotent: repeating the call for the same pairing succeeds.
+   */
+  async initializeMatch(roomId: string, white: SeatAssignment, black: SeatAssignment): Promise<boolean> {
+    if (!isValidRoomId(roomId) || roomId === WORLD_ROOM_ID) throw new Error('Invalid room id');
+    const existing = this.load();
+    if (existing) {
+      return existing.record.kind === 'match' && existing.record.white === white.hash && existing.record.black === black.hash;
+    }
+    this.ensureSchema();
+    const now = Date.now();
+    const match = Match.createMatchGame(roomId, white, black, now);
+    // Both players start "away": whoever doesn't show up forfeits after the grace period.
+    match.record.awaySince = { w: now, b: now };
+    this.match = match;
+    this.loaded = true;
+    this.storedGame = match.record.game;
+    this.storedPly = 0;
+    this.save();
+    this.scheduleAlarm();
+    return true;
+  }
+
+  /** Lets the lobby check whether a matched guest still has a game here. */
+  async playerStatus(hash: string): Promise<{ seated: boolean; status: MatchStatus } | null> {
+    const match = this.load();
+    if (!match) return null;
+    return { seated: match.colorOf(hash) !== null, status: match.record.status };
   }
 
   // ---------------------------------------------------------- WebSockets
@@ -154,7 +206,7 @@ export class ChessRoom extends DurableObject<Env> {
       return;
     }
 
-    const result = this.apply(match, attachment.hash, msg, Date.now());
+    const result = this.apply(match, attachment.hash, msg, Date.now(), attachment.name ?? DEFAULT_NAME);
     if (!result.ok) {
       send(ws, { type: 'error', code: result.code, message: result.message });
       // Re-sync the sender so an optimistic move on their board is undone.
@@ -163,7 +215,7 @@ export class ChessRoom extends DurableObject<Env> {
     }
     this.save();
     this.broadcastState();
-    if (match.record.kind === 'world') this.scheduleAlarm();
+    if (hasGameTimers(match.policy)) this.scheduleAlarm();
   }
 
   async webSocketClose(ws: WebSocket): Promise<void> {
@@ -178,54 +230,26 @@ export class ChessRoom extends DurableObject<Env> {
 
   // --------------------------------------------------------------- Alarm
 
-  /** Expires abandoned private rooms and frees world-room seats. */
+  /** Runs the room's timers (seat grace, move limit, seat rotation) and expires idle rooms. */
   async alarm(): Promise<void> {
     const match = this.load();
     if (!match) return;
     const now = Date.now();
-
-    if (match.record.kind === 'private') {
-      const idle = now - match.record.updatedAt >= ROOM_TTL_MS;
-      if (idle && this.ctx.getWebSockets().length === 0) {
-        // Removes the SQLite database and (since 2026-02-24) the alarm too.
-        await this.ctx.storage.deleteAll();
-        this.match = null;
-        return;
-      }
-      await this.ctx.storage.setAlarm(Math.max(match.record.updatedAt + ROOM_TTL_MS, now + 60 * 60 * 1000));
-      return;
-    }
-
     this.alarmAt = null; // this alarm has fired
-    let changed = this.markAbsentPlayers(now);
-    const { online } = this.presence();
-    const gone = COLORS.filter((color) => {
-      const since = match.record.awaySince[color];
-      return match.seat(color) && !online[color] && since !== null && now - since >= WORLD_SEAT_GRACE_MS;
-    });
-    if (gone.length === 2) {
-      // Both players vanished: nobody wins, the board resets for new players.
-      match.resetBoard(now);
-      changed = true;
-    } else if (gone.length === 1) {
-      match.forfeitAbsent(gone[0], now);
-      changed = true;
-    }
-    const { status, turnStartedAt, endedAt } = match.record;
-    if (status === 'active' && turnStartedAt !== null && now - turnStartedAt >= WORLD_TURN_LIMIT_MS) {
-      match.timeoutTurn(now);
-      changed = true;
-    }
-    const seated = Boolean(match.record.white || match.record.black);
-    if (match.record.status === 'over' && seated && endedAt !== null && now - endedAt >= WORLD_POSTGAME_MS) {
-      match.resetBoard(now);
-      changed = true;
-    }
-    if (changed) {
+
+    if (this.applyTimers(match, now)) {
       this.save();
       this.broadcastState();
     }
-    this.scheduleAlarm();
+
+    const { ttlMs } = match.policy;
+    if (ttlMs !== null && now - match.record.updatedAt >= ttlMs && this.ctx.getWebSockets().length === 0) {
+      // Removes the SQLite database and (since 2026-02-24) the alarm too.
+      await this.ctx.storage.deleteAll();
+      this.match = null;
+      return;
+    }
+    this.scheduleAlarm(now);
   }
 
   // ------------------------------------------------------------ Handlers
@@ -255,33 +279,37 @@ export class ChessRoom extends DurableObject<Env> {
       return;
     }
     const now = Date.now();
+    const sentName = sanitizeDisplayName(msg.name);
+    const name = sentName ?? DEFAULT_NAME;
     // Free seats go to new visitors only; reconnecting sockets and players who
     // chose to leave send sit:false. A seat you already hold is always yours.
-    let dirty = msg.sit === false ? false : match.claimSeat(hash, now).changed;
+    let dirty = msg.sit === false ? false : match.claimSeat(hash, now, undefined, name).changed;
+    // Only a valid name replaces the one on the seat (a missing name keeps it).
+    if (sentName && match.setName(hash, sentName)) dirty = true;
     const color = match.colorOf(hash);
     if (!color && !this.isConnected(hash) && this.presence().spectators >= LIMITS.maxSpectators) {
       send(ws, { type: 'error', code: 'room_full', message: 'This game has too many spectators right now. Try again soon.' });
       ws.close(CloseCode.RoomFull, 'room_full');
       return;
     }
-    ws.serializeAttachment({ hash, connectedAt: attachment?.connectedAt ?? now } satisfies Attachment);
+    ws.serializeAttachment({ hash, connectedAt: attachment?.connectedAt ?? now, name } satisfies Attachment);
     if (color && match.record.awaySince[color] !== null) {
       match.record.awaySince[color] = null;
       dirty = true;
     }
-    if (match.record.kind === 'world' && this.markAbsentPlayers(now)) dirty = true;
+    if (this.markAbsentPlayers(now)) dirty = true;
 
     if (dirty) {
       this.save();
       this.broadcastState();
-      if (match.record.kind === 'world') this.scheduleAlarm();
+      if (hasGameTimers(match.policy)) this.scheduleAlarm(now);
     } else {
       this.sendState(ws, hash);
       this.broadcastPresence({ skip: ws });
     }
   }
 
-  private apply(match: Match, hash: string, msg: ClientMessage, now: number): ActionResult {
+  private apply(match: Match, hash: string, msg: ClientMessage, now: number, name: string): ActionResult {
     switch (msg.type) {
       case 'move':
         return match.move(hash, msg, now);
@@ -295,7 +323,10 @@ export class ChessRoom extends DurableObject<Env> {
         return match.leave(hash, now);
       case 'sit': {
         if (match.colorOf(hash)) return { ok: false, code: 'already_seated', message: 'You already have a seat.' };
-        const { changed } = match.claimSeat(hash, now, msg.color);
+        if (!match.policy.openSeating) {
+          return { ok: false, code: 'not_allowed', message: 'Seats in matchmade games belong to the matched players.' };
+        }
+        const { changed } = match.claimSeat(hash, now, msg.color, name);
         if (!changed) return { ok: false, code: 'seat_taken', message: 'Both seats are taken.' };
         return { ok: true, changes: { newGame: false, appendMove: null } };
       }
@@ -309,7 +340,7 @@ export class ChessRoom extends DurableObject<Env> {
     const hash = (ws.deserializeAttachment() as Attachment | null)?.hash;
     if (!match || !hash) return;
     const color = match.colorOf(hash);
-    if (color && match.record.kind === 'world' && !this.presence(ws).online[color]) {
+    if (color && match.policy.seatGraceMs !== null && !this.presence(ws).online[color]) {
       if (match.record.awaySince[color] === null) {
         match.record.awaySince[color] = Date.now();
         this.save();
@@ -319,10 +350,53 @@ export class ChessRoom extends DurableObject<Env> {
     this.broadcastPresence({ departed: ws });
   }
 
-  /** World room: start the abandonment clock for seated players with no connection. */
+  // -------------------------------------------------------------- Timers
+
+  /** Apply every timer that has run out. Returns true if the game changed. */
+  private applyTimers(match: Match, now: number): boolean {
+    const policy = match.policy;
+    let changed = this.markAbsentPlayers(now);
+
+    if (policy.seatGraceMs !== null) {
+      const grace = policy.seatGraceMs;
+      const { online } = this.presence();
+      const gone = COLORS.filter((color) => {
+        const since = match.record.awaySince[color];
+        return match.seat(color) && !online[color] && since !== null && now - since >= grace;
+      });
+      if (gone.length === 2) {
+        // Both players vanished: nobody wins; open boards reset for new players.
+        match.abandonAll(now);
+        changed = true;
+      } else if (gone.length === 1) {
+        match.forfeitAbsent(gone[0], now);
+        changed = true;
+      }
+    }
+    const { status, turnStartedAt } = match.record;
+    if (policy.turnLimitMs !== null && status === 'active' && turnStartedAt !== null && now - turnStartedAt >= policy.turnLimitMs) {
+      match.timeoutTurn(now);
+      changed = true;
+    }
+    const seated = Boolean(match.record.white || match.record.black);
+    const { endedAt } = match.record;
+    if (
+      policy.rotateSeatsAfterMs !== null &&
+      match.record.status === 'over' &&
+      seated &&
+      endedAt !== null &&
+      now - endedAt >= policy.rotateSeatsAfterMs
+    ) {
+      match.resetBoard(now);
+      changed = true;
+    }
+    return changed;
+  }
+
+  /** Start the abandonment clock for seated players with no connection (rooms with a seat grace period). */
   private markAbsentPlayers(now: number): boolean {
     const match = this.match;
-    if (!match || match.record.kind !== 'world') return false;
+    if (!match || match.policy.seatGraceMs === null) return false;
     const { online } = this.presence();
     let changed = false;
     for (const color of COLORS) {
@@ -334,42 +408,58 @@ export class ChessRoom extends DurableObject<Env> {
     return changed;
   }
 
-  /** The next moment a World Board timer needs checking, or null if none is running. */
-  private nextWorldDeadline(): number | null {
+  /** The next moment a timer needs checking, or null if none is running. */
+  private nextDeadline(now: number): number | null {
     const match = this.match;
-    if (!match || match.record.kind !== 'world') return null;
-    const { awaySince, status, turnStartedAt, endedAt, white, black } = match.record;
+    if (!match) return null;
+    const policy = match.policy;
+    const { awaySince, status, turnStartedAt, endedAt, white, black, updatedAt } = match.record;
     const deadlines: number[] = [];
-    for (const color of COLORS) {
-      const since = awaySince[color];
-      if (since !== null && match.seat(color)) deadlines.push(since + WORLD_SEAT_GRACE_MS);
+    if (policy.seatGraceMs !== null) {
+      for (const color of COLORS) {
+        const since = awaySince[color];
+        if (since !== null && match.seat(color)) deadlines.push(since + policy.seatGraceMs);
+      }
     }
-    if (status === 'active' && turnStartedAt !== null) deadlines.push(turnStartedAt + WORLD_TURN_LIMIT_MS);
-    if (status === 'over' && endedAt !== null && (white || black)) deadlines.push(endedAt + WORLD_POSTGAME_MS);
+    if (policy.turnLimitMs !== null && status === 'active' && turnStartedAt !== null) {
+      deadlines.push(turnStartedAt + policy.turnLimitMs);
+    }
+    if (policy.rotateSeatsAfterMs !== null && status === 'over' && endedAt !== null && (white || black)) {
+      deadlines.push(endedAt + policy.rotateSeatsAfterMs);
+    }
+    if (policy.ttlMs !== null) deadlines.push(Math.max(updatedAt + policy.ttlMs, now + EXPIRY_RECHECK_MS));
     return deadlines.length ? Math.min(...deadlines) : null;
   }
 
   /**
-   * World room: make sure an alarm fires by the next deadline. An alarm that is
-   * already due sooner is kept (the handler reschedules), which avoids a
-   * storage write on every move.
+   * Make sure an alarm fires by the next deadline. An alarm that is already
+   * due sooner is kept (the handler reschedules), which avoids a storage
+   * write on every move.
    */
-  private scheduleAlarm(): void {
-    const next = this.nextWorldDeadline();
+  private scheduleAlarm(now = Date.now()): void {
+    const next = this.nextDeadline(now);
     if (next === null) return;
     if (this.alarmAt !== null && this.alarmAt <= next) return;
     this.alarmAt = next;
     void this.ctx.storage.setAlarm(next);
   }
 
-  /** World Board countdowns for the client; null for private rooms. */
+  /** Countdowns for the client (World Board and matchmade games); null otherwise. */
   private timers(): RoomTimers | null {
     const match = this.match;
-    if (!match || match.record.kind !== 'world') return null;
+    if (!match) return null;
+    const policy = match.policy;
+    if (policy.turnLimitMs === null && policy.rotateSeatsAfterMs === null) return null;
     const { status, turnStartedAt, endedAt, white, black } = match.record;
     return {
-      turnEndsAt: status === 'active' && turnStartedAt !== null ? turnStartedAt + WORLD_TURN_LIMIT_MS : null,
-      seatsReopenAt: status === 'over' && endedAt !== null && (white || black) ? endedAt + WORLD_POSTGAME_MS : null,
+      turnEndsAt:
+        policy.turnLimitMs !== null && status === 'active' && turnStartedAt !== null
+          ? turnStartedAt + policy.turnLimitMs
+          : null,
+      seatsReopenAt:
+        policy.rotateSeatsAfterMs !== null && status === 'over' && endedAt !== null && (white || black)
+          ? endedAt + policy.rotateSeatsAfterMs
+          : null,
       serverTime: Date.now(),
     };
   }
@@ -495,7 +585,10 @@ export class ChessRoom extends DurableObject<Env> {
       turn_started_at INTEGER,
       ended_at INTEGER,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      white_name TEXT,
+      black_name TEXT,
+      listed INTEGER NOT NULL DEFAULT 0
     )`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS moves (
       ply INTEGER PRIMARY KEY,
@@ -511,15 +604,23 @@ export class ChessRoom extends DurableObject<Env> {
     )`);
   }
 
-  private create(roomId: string, kind: RoomKind): Match {
+  /** Rooms created by older versions lack newer columns; add them in place. */
+  private migrate(): void {
+    const columns = new Set(this.sql.exec('SELECT * FROM room LIMIT 0').columnNames);
+    if (!columns.has('white_name')) this.sql.exec('ALTER TABLE room ADD COLUMN white_name TEXT');
+    if (!columns.has('black_name')) this.sql.exec('ALTER TABLE room ADD COLUMN black_name TEXT');
+    if (!columns.has('listed')) this.sql.exec('ALTER TABLE room ADD COLUMN listed INTEGER NOT NULL DEFAULT 0');
+  }
+
+  private create(roomId: string, kind: RoomKind, options: { listed?: boolean } = {}): Match {
     this.ensureSchema();
     const now = Date.now();
-    this.match = Match.create(roomId, kind, now);
+    this.match = Match.create(roomId, kind, now, options);
     this.loaded = true;
     this.storedGame = this.match.record.game;
     this.storedPly = 0;
     this.save();
-    if (kind === 'private') void this.ctx.storage.setAlarm(now + ROOM_TTL_MS);
+    this.scheduleAlarm(now);
     return this.match;
   }
 
@@ -529,6 +630,7 @@ export class ChessRoom extends DurableObject<Env> {
     this.loaded = true;
     const tables = this.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'room'").toArray();
     if (tables.length === 0) return (this.match = null);
+    this.migrate();
     const row = this.sql.exec('SELECT * FROM room WHERE id = 1').toArray()[0] as Row | undefined;
     if (!row) return (this.match = null);
     const moves = this.sql.exec('SELECT * FROM moves ORDER BY ply').toArray().map((m) => rowToMove(m as Row));
@@ -548,11 +650,12 @@ export class ChessRoom extends DurableObject<Env> {
       this.sql.exec(
         `INSERT OR REPLACE INTO room (id, room_id, kind, game, white, black, fen, ply, status, end_winner,
           end_reason, rematch_w, rematch_b, draw_offer, white_away_since, black_away_since, turn_started_at,
-          ended_at, created_at, updated_at)
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ended_at, created_at, updated_at, white_name, black_name, listed)
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         r.roomId, r.kind, r.game, r.white, r.black, r.fen, match.ply, r.status, r.end?.winner ?? null,
         r.end?.reason ?? null, r.rematch.w ? 1 : 0, r.rematch.b ? 1 : 0, r.drawOffer,
         r.awaySince.w, r.awaySince.b, r.turnStartedAt, r.endedAt, r.createdAt, r.updatedAt,
+        r.names.w, r.names.b, r.listed ? 1 : 0,
       );
       if (r.game !== this.storedGame) {
         this.sql.exec('DELETE FROM moves');
@@ -576,9 +679,10 @@ export class ChessRoom extends DurableObject<Env> {
 function rowToRecord(row: Row): MatchRecord {
   const winner = row.end_winner as Color | null;
   const reason = row.end_reason as EndReason | null;
+  const kind = row.kind as RoomKind;
   return {
     roomId: row.room_id as string,
-    kind: row.kind as RoomKind,
+    kind,
     game: row.game as number,
     white: row.white as string | null,
     black: row.black as string | null,
@@ -592,6 +696,11 @@ function rowToRecord(row: Row): MatchRecord {
     awaySince: { w: row.white_away_since as number | null, b: row.black_away_since as number | null },
     turnStartedAt: row.turn_started_at as number | null,
     endedAt: row.ended_at as number | null,
+    names: {
+      w: row.white ? ((row.white_name as string | null) ?? DEFAULT_NAME) : null,
+      b: row.black ? ((row.black_name as string | null) ?? DEFAULT_NAME) : null,
+    },
+    listed: POLICIES[kind].alwaysListed || row.listed === 1,
   };
 }
 
@@ -609,13 +718,6 @@ function rowToMove(row: Row): MoveRecord {
   if (row.promotion) move.promotion = row.promotion as PromotionPiece;
   if (row.captured) move.captured = row.captured as PieceType;
   return move;
-}
-
-/** Only a hash of the guest token is ever stored or compared. */
-async function hashToken(token: string): Promise<string> {
-  const data = new TextEncoder().encode(`tweetchess:guest:${token}`);
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
-  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function send(ws: WebSocket, message: ServerMessage): void {

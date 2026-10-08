@@ -1,4 +1,4 @@
-import type { Color, PieceType } from '../../shared/protocol.ts';
+import { colorName, type Color, type PieceType } from '../../shared/protocol.ts';
 import { PieceIcon } from './Board.tsx';
 
 export type SeatStatus = 'online' | 'offline' | 'open' | 'local';
@@ -38,7 +38,7 @@ export function PlayerBar({ color, name, isYou, seat, isTurn, captured, advantag
         {seat !== 'local' && (
           <div className={`seat-status seat-${seat}`}>
             <span className="dot" aria-hidden="true" />
-            {SEAT_LABEL[seat]}
+            {colorName(color)} · {SEAT_LABEL[seat]}
           </div>
         )}
       </div>

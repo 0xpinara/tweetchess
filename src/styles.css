@@ -1084,6 +1084,105 @@ input {
   height: 100%;
 }
 
+/* ------------------------------------------------------ Name editor */
+
+.name-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 15px;
+  color: var(--text-muted);
+}
+
+.name-editor strong {
+  color: var(--text);
+}
+
+.name-avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1d9bf0, #00ba7c);
+  color: #fff;
+  font-weight: 800;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.name-editor input {
+  flex: 1;
+  min-width: 140px;
+  max-width: 220px;
+  padding: 8px 12px;
+  border-radius: var(--radius-small);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+}
+
+.name-editor .form-error {
+  flex-basis: 100%;
+  text-align: center;
+}
+
+/* ------------------------------------------------------ Matchmaking */
+
+.matchmaking-card {
+  max-width: 480px;
+}
+
+.matchmaking-card .btn-large {
+  min-width: 220px;
+}
+
+.disclosure {
+  padding: 10px 14px;
+  border-radius: var(--radius-small);
+  border: 1px solid rgba(29, 155, 240, 0.3);
+  background: var(--accent-soft);
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.search-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.searching-spinner {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 5px solid var(--surface-3);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.match-found-icon {
+  font-size: 44px;
+  line-height: 1;
+}
+
+.card-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 20px;
+  font-size: 14px;
+}
+
 /* ------------------------------------------------- Narrow screens */
 
 @media (max-width: 420px) {

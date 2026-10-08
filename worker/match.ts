@@ -22,6 +22,7 @@ import {
   type RoomTimers,
   type SeatInfo,
 } from '../shared/protocol.ts';
+import { POLICIES, type RoomPolicy } from './policies.ts';
 
 export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -45,6 +46,10 @@ export interface MatchRecord {
   turnStartedAt: number | null;
   /** When the current game finished (null unless it is over). */
   endedAt: number | null;
+  /** Public display names of the seated players. */
+  names: Record<Color, string | null>;
+  /** Shown in the public live-games directory. */
+  listed: boolean;
 }
 
 /** One persisted half-move of the current game. */
@@ -81,6 +86,12 @@ export interface Presence {
   spectators: number;
 }
 
+/** A player assigned to a seat by matchmaking. */
+export interface SeatAssignment {
+  hash: string;
+  name: string;
+}
+
 const COLORS: readonly Color[] = ['w', 'b'];
 
 /**
@@ -110,7 +121,7 @@ export class Match {
     this.moves = moves;
   }
 
-  static create(roomId: string, kind: RoomKind, now: number): Match {
+  static create(roomId: string, kind: RoomKind, now: number, options: { listed?: boolean } = {}): Match {
     return new Match(
       {
         roomId,
@@ -128,18 +139,44 @@ export class Match {
         awaySince: { w: null, b: null },
         turnStartedAt: null,
         endedAt: null,
+        names: { w: null, b: null },
+        listed: POLICIES[kind].alwaysListed || Boolean(options.listed),
       },
       [],
     );
+  }
+
+  /** A matchmade game: both seats are filled and the clock starts immediately. */
+  static createMatchGame(roomId: string, white: SeatAssignment, black: SeatAssignment, now: number): Match {
+    const match = Match.create(roomId, 'match', now);
+    match.record.white = white.hash;
+    match.record.black = black.hash;
+    match.record.names = { w: white.name, b: black.name };
+    match.record.status = 'active';
+    match.record.turnStartedAt = now;
+    return match;
+  }
+
+  get policy(): RoomPolicy {
+    return POLICIES[this.record.kind];
   }
 
   seat(color: Color): string | null {
     return color === 'w' ? this.record.white : this.record.black;
   }
 
-  private setSeat(color: Color, hash: string | null): void {
+  private setSeat(color: Color, hash: string | null, name: string | null = null): void {
     if (color === 'w') this.record.white = hash;
     else this.record.black = hash;
+    this.record.names[color] = hash ? name : null;
+  }
+
+  /** Update a seated player's display name. Returns true if it changed. */
+  setName(hash: string, name: string): boolean {
+    const color = this.colorOf(hash);
+    if (!color || this.record.names[color] === name) return false;
+    this.record.names[color] = name;
+    return true;
   }
 
   colorOf(hash: string): Color | null {
@@ -164,15 +201,17 @@ export class Match {
    * Give `hash` a seat if one is free. Called when a visitor connects and when
    * a spectator explicitly asks to sit. Returns the visitor's role afterwards.
    */
-  claimSeat(hash: string, now: number, preferred?: Color): { role: Role; changed: boolean } {
+  claimSeat(hash: string, now: number, preferred?: Color, name: string | null = null): { role: Role; changed: boolean } {
     const existing = this.colorOf(hash);
     if (existing) return { role: existing, changed: false };
+    // Matchmade seats belong to the matched players only.
+    if (!this.policy.openSeating) return { role: 'spectator', changed: false };
 
     const free = COLORS.filter((color) => this.seat(color) === null);
     if (free.length === 0) return { role: 'spectator', changed: false };
     const color = preferred && free.includes(preferred) ? preferred : free[0];
 
-    this.setSeat(color, hash);
+    this.setSeat(color, hash, name);
     this.record.awaySince[color] = null;
     this.record.updatedAt = now;
 
@@ -281,7 +320,7 @@ export class Match {
   rematch(hash: string, want: boolean, game: number, now: number): ActionResult {
     const color = this.colorOf(hash);
     if (!color) return fail('not_a_player', 'Only players can ask for a rematch.');
-    if (this.record.kind === 'world') {
+    if (!this.policy.rematch) {
       return fail('not_allowed', 'On the World Board the seats open up for new players after each game.');
     }
     if (game !== this.record.game) return fail('stale', 'A newer game has already started.');
@@ -317,8 +356,9 @@ export class Match {
   }
 
   /**
-   * World room: the player to move took too long. Before the first move they
-   * just lose the seat; after that they lose the game on time.
+   * The player to move took too long (World Board and matchmade games). Before
+   * the first move they just lose the seat (a matchmade game is aborted);
+   * after that they lose the game on time.
    */
   timeoutTurn(now: number): ActionResult {
     if (this.record.status !== 'active') return fail('game_not_active', 'No game in progress.');
@@ -336,15 +376,29 @@ export class Match {
   resetBoard(now: number): ActionResult {
     this.record.white = null;
     this.record.black = null;
+    this.record.names = { w: null, b: null };
     this.record.awaySince = { w: null, b: null };
     this.startNewGame(false, now);
     this.record.updatedAt = now;
     return ok({ newGame: true });
   }
 
+  /**
+   * Both seated players vanished. Rooms with open seating reset for new
+   * players; a matchmade game simply ends without a winner.
+   */
+  abandonAll(now: number): ActionResult {
+    if (this.policy.openSeating) return this.resetBoard(now);
+    if (this.record.status === 'active') this.finish(null, 'aborted', now);
+    this.record.awaySince = { w: null, b: null };
+    this.record.updatedAt = now;
+    return ok();
+  }
+
   private vacate(color: Color, reason: 'resignation' | 'abandonment', now: number): void {
     if (this.record.status === 'active') {
       if (this.ply > 0) this.finish(opposite(color), reason, now);
+      else if (this.policy.abortWithoutMoves) this.finish(null, 'aborted', now);
       else {
         this.record.status = 'waiting';
         this.record.turnStartedAt = null;
@@ -372,11 +426,11 @@ export class Match {
 
   private startNewGame(swapColors: boolean, now: number): void {
     if (swapColors) {
-      const { white, black } = this.record;
+      const { white, black, names, awaySince } = this.record;
       this.record.white = black;
       this.record.black = white;
-      const away = this.record.awaySince;
-      this.record.awaySince = { w: away.b, b: away.w };
+      this.record.names = { w: names.b, b: names.w };
+      this.record.awaySince = { w: awaySince.b, b: awaySince.w };
     }
     this.record.game += 1;
     this.record.fen = START_FEN;
@@ -393,6 +447,7 @@ export class Match {
     const seat = (color: Color): SeatInfo => ({
       taken: this.seat(color) !== null,
       online: this.seat(color) !== null && presence.online[color],
+      name: this.seat(color) !== null ? this.record.names[color] : null,
     });
     return {
       roomId: this.record.roomId,
@@ -413,6 +468,7 @@ export class Match {
       drawOffer: this.record.drawOffer,
       spectators: presence.spectators,
       timers,
+      listed: this.record.listed,
     };
   }
 }

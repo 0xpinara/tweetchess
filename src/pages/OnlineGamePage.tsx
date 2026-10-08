@@ -8,12 +8,14 @@ import {
   type RoomSnapshot,
 } from '../../shared/protocol.ts';
 import { AppHeader } from '../components/AppHeader.tsx';
+import { Link } from '../components/Link.tsx';
 import { Board } from '../components/Board.tsx';
 import { ConnectionBadge } from '../components/ConnectionBadge.tsx';
 import { KeyboardPanel } from '../components/KeyboardPanel.tsx';
 import { MoveList } from '../components/MoveList.tsx';
 import { PlayerBar, type SeatStatus } from '../components/PlayerBar.tsx';
 import { ShareButton } from '../components/ShareButton.tsx';
+import { forgetActiveGame, rememberActiveGame } from '../lib/active-games.ts';
 import { createRoom } from '../lib/api.ts';
 import {
   capturedBy,
@@ -91,8 +93,21 @@ export function OnlineGamePage({ roomId }: { roomId: string }) {
   const yourTurn = Boolean(state && me && state.status === 'active' && turn === me);
 
   useEffect(() => {
-    document.title = yourTurn ? '● Your move · TweetChess' : isWorld ? 'World Board · TweetChess' : 'Live game · TweetChess';
+    document.title = yourTurn ? '● Your move · Timeline Games' : isWorld ? 'World Board · Timeline Games' : 'Chess · Timeline Games';
   }, [yourTurn, isWorld]);
+
+  // Remember games you're seated in, for "Return to your game" on the homepage.
+  const hasState = state !== null;
+  const seatedInActiveGame = Boolean(state && me && state.status !== 'over');
+  const opponentName = state && me ? state.seats[opposite(me)].name : null;
+  useEffect(() => {
+    if (!hasState) return;
+    if (seatedInActiveGame) {
+      rememberActiveGame({ game: 'chess', id: roomId, label: opponentName ? `Chess vs ${opponentName}` : 'Chess game' });
+    } else {
+      forgetActiveGame('chess', roomId);
+    }
+  }, [hasState, seatedInActiveGame, opponentName, roomId]);
 
   // Screen readers announce changes to this live-region text.
   const lastMoveInfo = state?.moves.at(-1);
@@ -194,7 +209,7 @@ export function OnlineGamePage({ roomId }: { roomId: string }) {
   const playerBar = (color: Color) => (
     <PlayerBar
       color={color}
-      name={colorName(color)}
+      name={state.seats[color].name ?? colorName(color)}
       isYou={me === color}
       seat={seatStatus(color)}
       isTurn={state.status === 'active' && turn === color}
@@ -253,8 +268,14 @@ export function OnlineGamePage({ roomId }: { roomId: string }) {
             <span className="watchers" title="People watching this game">
               <EyeIcon /> {state.spectators} watching
             </span>
-            <span className="room-code">{isWorld ? 'World Board' : state.game > 1 ? `Game #${state.game}` : 'Private game'}</span>
+            <span className="room-code">{roomLabel(state)}</span>
           </div>
+          {state.kind === 'match' && (
+            <p className="hint">
+              Matchmade games are public and anyone can watch. Each move has a 3-minute limit, and a player who stays
+              disconnected for 90 seconds loses.
+            </p>
+          )}
           {isWorld && (
             <p className="hint">
               The World Board is one public game. Players get 3 minutes per move and lose their seat after a minute
@@ -279,6 +300,13 @@ export function OnlineGamePage({ roomId }: { roomId: string }) {
       )}
     </div>
   );
+}
+
+function roomLabel(state: RoomSnapshot): string {
+  if (state.kind === 'world') return 'World Board';
+  if (state.kind === 'match') return state.game > 1 ? `Matchmade game #${state.game}` : 'Matchmade game';
+  const base = state.game > 1 ? `Game #${state.game}` : 'Private game';
+  return state.listed ? `${base} · public` : base;
 }
 
 interface Clocks {
@@ -406,7 +434,9 @@ function GameActions({
   );
 
   if (!me) {
-    const openSeats = (['w', 'b'] as Color[]).filter((color) => !state.seats[color].taken);
+    // Matchmade seats belong to the matched players; nobody else can sit.
+    const openSeats =
+      state.kind === 'match' ? [] : (['w', 'b'] as Color[]).filter((color) => !state.seats[color].taken);
     return (
       <>
         {openSeats.map((color) => (
@@ -533,7 +563,13 @@ function GameActions({
     <>
       {rematch}
       {flip}
-      <NewGameButton label="New game" variant="secondary" />
+      {state.kind === 'match' ? (
+        <Link to="/chess/matchmaking" className="btn btn-secondary">
+          Find a new match
+        </Link>
+      ) : (
+        <NewGameButton label="New game" variant="secondary" />
+      )}
       {leave}
     </>
   );

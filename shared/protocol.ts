@@ -23,7 +23,8 @@ const SQUARE_PATTERN = /^[a-h][1-8]$/;
 
 export type Color = 'w' | 'b';
 export type Role = Color | 'spectator';
-export type RoomKind = 'private' | 'world';
+/** private = friend game, world = the public /world board, match = created by matchmaking. */
+export type RoomKind = 'private' | 'world' | 'match';
 export type PieceType = 'p' | 'n' | 'b' | 'r' | 'q' | 'k';
 export type PromotionPiece = 'q' | 'r' | 'b' | 'n';
 
@@ -38,7 +39,8 @@ export type EndReason =
   | 'agreement'
   | 'resignation'
   | 'abandonment'
-  | 'timeout';
+  | 'timeout'
+  | 'aborted';
 
 export interface GameEnd {
   /** null means the game was drawn. */
@@ -49,6 +51,8 @@ export interface GameEnd {
 export interface SeatInfo {
   taken: boolean;
   online: boolean;
+  /** The seated player's public display name. */
+  name: string | null;
 }
 
 /** World Board time limits (null in private rooms). Times are server epoch ms. */
@@ -87,6 +91,8 @@ export interface RoomSnapshot {
   drawOffer: Color | null;
   spectators: number;
   timers: RoomTimers | null;
+  /** Shown in the public live-games directory. */
+  listed: boolean;
 }
 
 export type ClientMessage =
@@ -95,7 +101,7 @@ export type ClientMessage =
    * reconnects and after the player chose to leave, so seats aren't reclaimed
    * by accident. A seat you already hold is always returned.
    */
-  | { type: 'hello'; token: string; protocol: number; sit?: boolean }
+  | { type: 'hello'; token: string; protocol: number; sit?: boolean; name?: string }
   | {
       type: 'move';
       from: string;
@@ -200,11 +206,14 @@ export function parseClientMessage(raw: string): ClientMessage | null {
 
   switch (msg.type) {
     case 'hello': {
-      if (!hasOnlyKeys(msg, ['type', 'token', 'protocol', 'sit'])) return null;
+      if (!hasOnlyKeys(msg, ['type', 'token', 'protocol', 'sit', 'name'])) return null;
       if (!isValidToken(msg.token) || !isCount(msg.protocol)) return null;
       if (msg.sit !== undefined && typeof msg.sit !== 'boolean') return null;
+      // The name is sanitised by the server (an invalid one becomes "Guest").
+      if (msg.name !== undefined && (typeof msg.name !== 'string' || msg.name.length > 64)) return null;
       const hello: ClientMessage = { type: 'hello', token: msg.token, protocol: msg.protocol };
       if (msg.sit !== undefined) hello.sit = msg.sit;
+      if (msg.name !== undefined) hello.name = msg.name;
       return hello;
     }
 
