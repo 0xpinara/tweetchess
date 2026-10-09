@@ -1,58 +1,73 @@
-# TweetChess on X — what works, what doesn't, and why
+# Timeline Games on X — what works, what doesn't, and why
 
 _Research date: 2026-10-08. X's documentation changes often; re-check before relying on it._
 
 ## Summary
 
-| Experience | Status in TweetChess | Cost |
+| Experience | Status in Timeline Games | Cost |
 | --- | --- | --- |
-| Link preview card (`summary_large_image`) with board image, title, description | ✅ Implemented | $0, no X API |
-| "Post on X" button that opens the composer pre-filled with text + game link (Web Intent) | ✅ Implemented | $0, no API key |
-| Playable chess **inside** the post (Player Card iframe) | ❌ Deliberately **not** implemented | — |
+| Link preview card (`summary_large_image`) with a chess or poker image, title, description | ✅ Implemented | $0, no X API |
+| "Post on X" button that opens the composer pre-filled with text + game or table link (Web Intent) | ✅ Implemented | $0, no API key |
+| Playable chess or poker **inside** the post (Player Card iframe) | ❌ Deliberately **not** implemented | — |
 
 ## 1. Link preview card (implemented)
 
-Every page route (`/`, `/game/<id>`, `/world`, `/local`) is served by the Worker, which rewrites
+Every page route (`/`, `/chess`, `/chess/matchmaking`, `/game/<id>`, `/world`, `/local`, `/poker`,
+`/poker/table/<id>`, `/live`, `/chess/live`, `/poker/live`) is served by the Worker, which rewrites
 `index.html` with [`HTMLRewriter`](../worker/pages.ts) so the card tags are in the **initial HTML**
 (X's crawler, `Twitterbot`, does not run JavaScript). Image URLs are made absolute from the request
-origin, e.g. `https://tweetchess.<your-subdomain>.workers.dev/og-image.png`.
+origin, e.g. `https://tweetchess.<your-subdomain>.workers.dev/og-chess.png`.
 
-Tags served:
+Each page gets its own title, description and image:
+
+| Pages | Title (example) | Image |
+| --- | --- | --- |
+| Chess game invites `/game/<id>` | Play me at chess ♟️ · Timeline Games | `og-chess.png` |
+| `/world`, `/local`, `/chess`, `/chess/matchmaking` | The World Board ♟️ · Timeline Games, … | `og-chess.png` |
+| Poker table invites `/poker/table/<id>` | Join my poker table 🃏 · Timeline Games | `og-poker.png` |
+| `/poker` | Texas Hold'em with friends · Timeline Games | `og-poker.png` |
+| `/`, `/live`, `/chess/live`, `/poker/live` | Timeline Games — chess & poker with your timeline, … | `og-image.png` (both games) |
+
+Tags served for a chess invite:
 
 ```html
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="Play me at chess on TweetChess ♟️" />
+<meta name="twitter:title" content="Play me at chess ♟️ · Timeline Games" />
 <meta name="twitter:description" content="Tap to take the open seat and play live…" />
-<meta name="twitter:image" content="https://…workers.dev/og-image.png" />
+<meta name="twitter:image" content="https://…workers.dev/og-chess.png" />
+<meta name="twitter:image:alt" content="Timeline Games: a chessboard with the words 'Live chess you can share in a post'" />
 <meta property="og:title" … /> <meta property="og:description" … />
-<meta property="og:image" … /> <meta property="og:url" content="https://…/game/<id>" />
+<meta property="og:image" … /> <meta property="og:image:alt" … /> <meta property="og:url" content="https://…/game/<id>" />
 ```
 
-Image rules from X's (archived) card docs, all satisfied by `public/og-image.png`:
-2:1 aspect ratio (ours: 1200×600), min 300×157, max 4096×4096, under 5 MB (ours: ~166 KB), PNG/JPG/WEBP/GIF, no SVG.
+Image rules from X's (archived) card docs, all satisfied by the three images in `public/`:
+2:1 aspect ratio (ours: 1200×600), min 300×157, max 4096×4096, under 5 MB (ours: 170–230 KB),
+PNG/JPG/WEBP/GIF, no SVG. Each image has alt text.
 
 Other requirements we meet:
 - `robots.txt` allows crawlers — "If a page with card markup is blocked, no card will be shown."
 - HTTPS (automatic on `workers.dev`).
 - Absolute image URLs.
 
-Regenerate the image after design changes with `npm run generate:assets`.
+Regenerate the images after design changes with `npm run generate:assets`.
 
 ### How to test the card (you must do this yourself — it can't be automated without an X account)
 
-1. Deploy (see the README) and copy a game URL, e.g. `https://tweetchess.<you>.workers.dev/game/AbCdEfGh12`.
+1. Deploy (see the README) and copy a game or table URL, e.g.
+   `https://tweetchess.<you>.workers.dev/game/AbCdEfGh12` or `…/poker/table/AbCdEfGh12`.
 2. Open X, start a new post, paste the URL. A preview card should appear in the composer within a few
    seconds. **You do not need to publish the post** — X's own guidance is that pasting into the composer
    is the test now that the Card Validator's preview was removed (Aug 2022).
 3. X caches cards for about **7 days**. If you change the image or text, test with a fresh URL
-   (any new game link works, or append `?v=2`).
+   (any new game or table link works, or append `?v=2`).
 
 If no card appears: open the URL in a private window and *View Source* — you should see the
 `twitter:*` tags with absolute `https://` URLs; check `https://<your-url>/robots.txt` returns `Allow: /`.
 
 ## 2. "Post on X" button (implemented)
 
-The share menu opens `https://x.com/intent/tweet?text=…&url=…` in a new tab. This is X's documented
+The share menu (on chess games and poker tables) opens `https://x.com/intent/tweet?text=…&url=…` in a
+new tab. This is X's documented
 **Web Intent**: "Web Intents do not require setting up a X application, storing app credentials, or
 prompting a viewer for app permissions." No paid API, no keys. (`twitter.com/intent/tweet` redirects
 to the same place.) Intents can't load inside iframes, which is why it opens a new tab.
@@ -82,9 +97,9 @@ card today.
   (nothing in X's developer changelog through 2026-10-02).
 
 Following the project brief ("do not bypass restrictions or misrepresent an interactive game as
-permitted video content"), TweetChess ships the standard link card and does **not** declare
-`twitter:card=player`. The production CSP also sets `frame-ancestors 'self'`, so the game can't be
-framed by other sites.
+permitted video content"), Timeline Games ships the standard link card and does **not** declare
+`twitter:card=player`, for chess or poker. The production CSP also sets `frame-ancestors 'self'`, so
+the games can't be framed by other sites.
 
 **If X publishes a supported way later**, the standalone app already works in narrow embedded browsers
 (tested down to 320 px wide), so an embed would mainly need: a `/embed/<id>` route, the player meta
