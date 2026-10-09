@@ -60,8 +60,8 @@ export const POKER_TIMING = {
   /** Delete a table nobody is connected to after this long without activity. */
   publicTtlMs: 30 * 60 * 1000,
   privateTtlMs: 24 * 60 * 60 * 1000,
-  /** Routine directory updates at most this often. */
-  publishIntervalMs: 15_000,
+  /** Routine directory updates (board, pot, spectators) at most this often; seat and status changes go out at once. */
+  publishIntervalMs: 60_000,
 };
 const RATE_BURST = 20;
 const RATE_PER_SECOND = 5;
@@ -354,7 +354,8 @@ export class PokerTable extends DurableObject<Env> {
     return {
       game: 'poker',
       id: state.tableId,
-      status: live ? 'playing' : 'waiting',
+      // Between hands a running game is still "playing"; "waiting" means it needs players.
+      status: live || state.nextHandAt !== null ? 'playing' : 'waiting',
       seated,
       maxSeats: state.config.maxSeats,
       phase: live ? hand!.street : 'waiting',
@@ -372,7 +373,7 @@ export class PokerTable extends DurableObject<Env> {
   private publish(force = false): void {
     if (this.state?.visibility !== 'public') return;
     const entry = this.listing();
-    const key = entry ? `${entry.status}|${entry.seated}|${entry.phase}` : 'removed';
+    const key = entry ? `${entry.status}|${entry.seated}` : 'removed';
     const now = Date.now();
     if (!force && key === this.lastPublishedKey && now - this.lastPublishedAt < POKER_TIMING.publishIntervalMs) return;
     if (!force && key === 'removed' && this.lastPublishedKey === 'removed') return;

@@ -26,14 +26,15 @@ async function createFriendGame(listed?: boolean): Promise<string> {
 }
 
 describe('live games directory', () => {
+  const defaults = { publishIntervalMs: DIRECTORY.publishIntervalMs, liveCacheMs: LIVE_CACHE.ttlMs };
   beforeAll(() => {
     // See every update immediately in tests.
     DIRECTORY.publishIntervalMs = 0;
     LIVE_CACHE.ttlMs = 0;
   });
   afterAll(() => {
-    DIRECTORY.publishIntervalMs = 20_000;
-    LIVE_CACHE.ttlMs = 5_000;
+    DIRECTORY.publishIntervalMs = defaults.publishIntervalMs;
+    LIVE_CACHE.ttlMs = defaults.liveCacheMs;
   });
 
   it('lists matchmade games publicly without exposing identities', async () => {

@@ -1,7 +1,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { LivePage } from '../../shared/lobby.ts';
+import type { LivePage, LivePokerTable } from '../../shared/lobby.ts';
 import type { PlayerView, PokerServerMessage, PublicTable } from '../../shared/poker.ts';
 import { LIVE_CACHE } from '../../worker/index.ts';
 import type { TableState } from '../../worker/poker/engine.ts';
@@ -100,15 +100,16 @@ function send(client: TestClient, hand: { number: number; seq: number }, action:
 }
 
 describe('poker tables', () => {
+  const defaults = { ...POKER_TIMING, liveCacheMs: LIVE_CACHE.ttlMs };
   beforeAll(() => {
     POKER_TIMING.startDelayMs = 0;
     POKER_TIMING.publishIntervalMs = 0;
     LIVE_CACHE.ttlMs = 0;
   });
   afterAll(() => {
-    POKER_TIMING.startDelayMs = 3_000;
-    POKER_TIMING.publishIntervalMs = 15_000;
-    LIVE_CACHE.ttlMs = 5_000;
+    POKER_TIMING.startDelayMs = defaults.startDelayMs;
+    POKER_TIMING.publishIntervalMs = defaults.publishIntervalMs;
+    LIVE_CACHE.ttlMs = defaults.liveCacheMs;
   });
 
   it('deals private hole cards that only their owner ever receives', async () => {
@@ -279,6 +280,45 @@ describe('poker tables', () => {
     const seventh = await openTable('find');
     expect(seventh).not.toBe(found[0]);
     for (const p of players) p.client.close();
+  });
+
+  it('refreshes a running table in the directory at most once a minute, but seat changes at once', async () => {
+    await resetFinder();
+    POKER_TIMING.publishIntervalMs = defaults.publishIntervalMs;
+    try {
+      const tableId = await openTable('find');
+      const a = await joinTable(tableId);
+      const b = await joinTable(tableId);
+      await handDealt(a.client, tableId);
+      const listed = async () => {
+        const page = (await (await exports.default.fetch(`${ORIGIN}/api/live?game=poker`)).json()) as LivePage;
+        return page.games.find((g) => g.id === tableId) as LivePokerTable | undefined;
+      };
+      const before = await eventually(listed, (g) => g?.status === 'playing' && g.seated === 2);
+
+      // A call changes the pot, but that is routine: no directory write yet.
+      const { player, hand } = await playerToAct([a, b], tableId);
+      send(player.client, hand, 'call');
+      await nextState(player.client, (st) => st.table.hand?.number === hand.number && st.table.hand.seq > hand.seq);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect((await listed())?.pot).toBe(before!.pot);
+
+      // Someone sitting down is shown at once.
+      const c = await joinTable(tableId);
+      expect((await eventually(listed, (g) => g?.seated === 3))?.seated).toBe(3);
+
+      // Between hands the table still counts as playing (so the finder doesn't treat it as waiting).
+      const next = await playerToAct([a, b], tableId);
+      send(next.player.client, next.hand, 'fold');
+      await nextState(next.player.client, (st) => Boolean(st.table.hand?.done));
+      const entry = await runInDurableObject(table(tableId), (instance: PokerTable) =>
+        (instance as unknown as { listing(): LivePokerTable }).listing(),
+      );
+      expect(entry.status).toBe('playing');
+      for (const p of [a, b, c]) p.client.close();
+    } finally {
+      POKER_TIMING.publishIntervalMs = 0;
+    }
   });
 
   it('runs tables independently', async () => {

@@ -62,8 +62,11 @@ export const WORLD_TURN_LIMIT_MS = POLICIES.world.turnLimitMs!;
 export const WORLD_POSTGAME_MS = POLICIES.world.rotateSeatsAfterMs!;
 /** When nobody is connected, re-check an idle room's expiry at most this often. */
 const EXPIRY_RECHECK_MS = 60 * 60 * 1000;
-/** Routine directory updates (moves, spectator counts) are sent at most this often (mutable for tests). */
-export const DIRECTORY = { publishIntervalMs: 20_000 };
+/**
+ * Routine directory updates (moves, spectator counts) are sent at most this often; seat and status
+ * changes go out at once. Each update costs a lobby request and two rows written (mutable for tests).
+ */
+export const DIRECTORY = { publishIntervalMs: 60_000 };
 /** Per-socket token bucket: burst of 20 messages, refilled at 5 per second. */
 const RATE_BURST = 20;
 const RATE_PER_SECOND = 5;
