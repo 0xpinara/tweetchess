@@ -3,7 +3,9 @@ import type { LiveFilter, LiveGame, LivePage, LiveGameType } from '../../shared/
 
 export type LiveScope = LiveGameType | 'all';
 
-const POLL_MS = 20_000;
+// Each poll is a Worker request (free plan: 100,000 a day), and listings refresh about once a
+// minute anyway, so open Live pages check every 30 seconds, and only while visible.
+const POLL_MS = 30_000;
 
 export async function fetchLive(scope: LiveScope, filter: LiveFilter, cursor: string | null = null): Promise<LivePage> {
   const params = new URLSearchParams({ game: scope, filter });
@@ -27,7 +29,7 @@ interface LiveData {
 const empty = (key: string): LiveData => ({ key, first: [], more: [], next: null, updatedAt: null, error: null, loaded: false });
 
 /**
- * Public live games, refreshed every 20 seconds while the page is visible
+ * Public live games, refreshed every 30 seconds while the page is visible
  * (and immediately when it becomes visible again). "Load more" appends pages.
  */
 export function useLiveGames(scope: LiveScope, filter: LiveFilter) {
